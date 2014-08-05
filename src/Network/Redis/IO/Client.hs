@@ -12,11 +12,12 @@ import Control.Exception (throwIO)
 import Control.Monad.IO.Class
 import Control.Monad.Catch
 import Control.Monad.Reader
+import Data.Foldable
 import Data.IORef
-import Data.Redis.Resp
 import Data.Word
 import Data.Pool hiding (Pool)
 import Network.Redis.IO.Connection (Connection)
+import Network.Redis.IO.Fetch
 import Network.Redis.IO.Settings
 import Network.Redis.IO.Timeouts (TimeoutManager)
 import Network.Redis.IO.Types (ConnectionError (..))
@@ -78,8 +79,13 @@ shutdown p = liftIO $ P.destroyAllResources (connPool p)
 runClient :: MonadIO m => Pool -> Client a -> m a
 runClient p a = liftIO $ runReaderT (client a) p
 
-request :: [Resp] -> Client [Either String Resp]
-request a = do
+request :: Fetch Client a -> Client a
+request (Fetch h) = h >>= \r -> case r of
+    Done a      -> return a
+    Blocked b k -> batch (toList b) >> request k
+
+batch :: [Request] -> Client ()
+batch a = do
     p <- ask
     let c = connPool p
         s = settings p

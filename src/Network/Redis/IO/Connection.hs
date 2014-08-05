@@ -2,6 +2,7 @@
 -- License, v. 2.0. If a copy of the MPL was not distributed with this
 -- file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+{-# LANGUAGE GADTs             #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module Network.Redis.IO.Connection
@@ -21,8 +22,10 @@ import Data.Foldable (foldrM)
 import Data.IORef
 import Data.Maybe (isJust)
 import Data.Redis.Resp
+import Data.Redis.Command
 import Data.Word
 import Network
+import Network.Redis.IO.Fetch
 import Network.Redis.IO.Settings
 import Network.Redis.IO.Types
 import Network.Redis.IO.Timeouts (TimeoutManager, withTimeout)
@@ -34,15 +37,18 @@ import Pipes.Parse
 import System.Logger hiding (Settings, settings, close)
 import System.Timeout
 
-import qualified Data.ByteString as B
-import qualified Network.Socket  as S
+import qualified Data.ByteString      as B
+import qualified Data.ByteString.Lazy as Lazy
+import qualified Network.Socket       as S
+
+type Src = Producer ByteString IO ()
 
 data Connection = Connection
     { settings :: !Settings
     , logger   :: !Logger
     , timeouts :: !TimeoutManager
     , sock     :: !Socket
-    , producer :: IORef (Producer ByteString IO ())
+    , producer :: IORef Src
     }
 
 instance Show Connection where
@@ -75,15 +81,13 @@ connect t g m a =
 close :: Connection -> IO ()
 close = S.close . sock
 
-request :: [Resp] -> Connection -> IO [Either String Resp]
+request :: [Request] -> Connection -> IO ()
 request a c =
     withTimeout (timeouts c) (sSendRecvTimeout (settings c)) abort $ do
         sendMany (sock c) $
-            concatMap (toChunks . encode) a
-        prod    <- readIORef (producer c)
-        (r, p') <- foldrM getResult ([], prod) a
-        writeIORef (producer c) p'
-        return (reverse r)
+            concatMap (toChunks . encoded) a
+        prod <- readIORef (producer c)
+        foldrM getResult prod a >>= writeIORef (producer c)
   where
     abort = do
         let str = show c
@@ -91,9 +95,28 @@ request a c =
         close c
         throwIO (Timeout str)
 
-    getResult _ (x, p) = do
-        (y, p') <- runStateT (parse resp) p
-        case y of
+    getResult :: Request -> Src -> IO Src
+    getResult r p = do
+        (x, p') <- runStateT (parse resp) p
+        case x of
             Nothing        -> throwIO ConnectionClosed
             Just (Left  e) -> throwIO $ InternalError (peMessage e)
-            Just (Right r) -> return  $ (Right r : x, p')
+            Just (Right y) -> respond r y >> return p'
+
+respond :: Request -> Resp -> IO ()
+respond (Request (Ping _) r) (Str x) = writeIORef r (Value x) -- FIXME!
+respond (Request (Set _) r) x = case x of
+    Err _    -> writeIORef r (Value False)
+    NullBulk -> writeIORef r (Value False)
+    _        -> writeIORef r (Value True)
+respond (Request (Get _) r) x = case x of
+    Err  _ -> writeIORef r (Value Nothing)
+    Str  y -> writeIORef r (Value (Just y))
+    Bulk y -> writeIORef r (Value (Just y))
+    _      -> writeIORef r (Value Nothing)
+
+
+encoded :: Request -> Lazy.ByteString
+encoded (Request (Ping x) _) = encode x
+encoded (Request (Get  x) _) = encode x
+encoded (Request (Set  x) _) = encode x

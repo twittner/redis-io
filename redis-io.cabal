@@ -35,6 +35,7 @@ library
         Network.Redis.IO.Settings
         Network.Redis.IO.Timeouts
         Network.Redis.IO.Types
+        Network.Redis.IO.Fetch
 
     build-depends:
         async            >= 2.0    && < 2.1
