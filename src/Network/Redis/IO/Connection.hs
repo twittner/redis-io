@@ -18,7 +18,7 @@ import Control.Exception
 import Control.Monad
 import Data.ByteString (ByteString)
 import Data.ByteString.Lazy (toChunks)
-import Data.Foldable (foldrM)
+import Data.Foldable (foldlM)
 import Data.IORef
 import Data.Maybe (isJust)
 import Data.Redis.Resp
@@ -87,7 +87,7 @@ request a c =
         sendMany (sock c) $
             concatMap (toChunks . encoded) a
         prod <- readIORef (producer c)
-        foldrM getResult prod a >>= writeIORef (producer c)
+        foldlM getResult prod a >>= writeIORef (producer c)
   where
     abort = do
         let str = show c
@@ -95,8 +95,8 @@ request a c =
         close c
         throwIO (Timeout str)
 
-    getResult :: Request -> Src -> IO Src
-    getResult r p = do
+    getResult :: Src -> Request -> IO Src
+    getResult p r = do
         (x, p') <- runStateT (parse resp) p
         case x of
             Nothing        -> throwIO ConnectionClosed
