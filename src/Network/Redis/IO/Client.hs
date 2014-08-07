@@ -9,15 +9,14 @@ module Network.Redis.IO.Client where
 
 import Control.Applicative
 import Control.Exception (throwIO)
-import Control.Monad.IO.Class
 import Control.Monad.Catch
 import Control.Monad.Reader
-import Data.Foldable
+import Control.Monad.Free
 import Data.IORef
+import Data.Redis.Command
 import Data.Word
 import Data.Pool hiding (Pool)
 import Network.Redis.IO.Connection (Connection)
-import Network.Redis.IO.Fetch
 import Network.Redis.IO.Settings
 import Network.Redis.IO.Timeouts (TimeoutManager)
 import Network.Redis.IO.Types (ConnectionError (..))
@@ -79,26 +78,37 @@ shutdown p = liftIO $ P.destroyAllResources (connPool p)
 runClient :: MonadIO m => Pool -> Client a -> m a
 runClient p a = liftIO $ runReaderT (client a) p
 
-request :: Fetch Client a -> Client a
-request (Fetch h) = h >>= \r -> case r of
-    Done a      -> return a
-    Blocked b k -> batch (toList b) >> request k
-
-batch :: [Request] -> Client ()
-batch a = do
+request :: Free Command a -> Client a
+request a = do
     p <- ask
     let c = connPool p
         s = settings p
     liftIO $ case sMaxWaitQueue s of
-        Nothing -> withResource c (C.request a)
+        Nothing -> withResource c $ \h -> run h a `finally` C.sync h
         Just  q -> tryWithResource c (go p) >>= maybe (retry q c p) return
   where
     go p h = do
         atomicModifyIORef' (failures p) $ \n -> (if n > 0 then n - 1 else 0, ())
-        C.request a h
+        run h a `finally` C.sync h
 
     retry q c p = do
         k <- atomicModifyIORef' (failures p) $ \n -> (n + 1, n)
         unless (k < q) $
             throwIO ConnectionsBusy
         withResource c (go p)
+
+run :: Connection -> Free Command a -> IO a
+run h a = case a of
+    Free (Ping x k) -> do
+        r <- newIORef undefined
+        C.request x r h
+        run h (k r)
+    Free (Get x k) -> do
+        r <- newIORef undefined
+        C.request x r h
+        run h (k r)
+    Free (Set x k) -> do
+        r <- newIORef undefined
+        C.request x r h
+        run h (k r)
+    Pure x         -> return x

@@ -35,22 +35,36 @@ library
         Network.Redis.IO.Settings
         Network.Redis.IO.Timeouts
         Network.Redis.IO.Types
-        Network.Redis.IO.Fetch
 
     build-depends:
-        async            >= 2.0    && < 2.1
-      , base             >= 4.5    && < 5.0
-      , bytestring       >= 0.9    && < 0.11
-      , containers       >= 0.5    && < 0.6
-      , exceptions       == 0.6.*
-      , mtl              == 2.1.*
-      , network          >= 2.5    && < 2.6
-      , pipes            == 4.1.*
-      , pipes-attoparsec == 0.5.*
-      , pipes-parse      == 3.0.*
-      , redis-resp       == 0.1.*
-      , resource-pool    >= 0.2    && < 0.3
-      , text             >= 1.0    && < 1.2
-      , time             == 1.4.*
-      , transformers     >= 0.3    && < 0.5
-      , tinylog          == 0.10.*
+        async          >= 2.0    && < 2.1
+      , attoparsec     >= 0.11   && < 0.13
+      , base           >= 4.5    && < 5.0
+      , bytestring     >= 0.9    && < 0.11
+      , containers     == 0.5.*
+      , exceptions     == 0.6.*
+      , free           == 4.9
+      , mtl            == 2.1.*
+      , network        >= 2.5    && < 2.6
+      , redis-resp     == 0.1.*
+      , resource-pool  >= 0.2    && < 0.3
+      , time           == 1.4.*
+      , transformers   >= 0.3    && < 0.5
+      , tinylog        == 0.10.*
+
+benchmark redis-io-bench
+    type:             exitcode-stdio-1.0
+    default-language: Haskell2010
+    main-is:          Bench.hs
+    hs-source-dirs:   bench
+    ghc-options:      -Wall -O2 -fwarn-tabs
+    build-depends:
+        async
+      , base
+      , bytestring
+      , criterion   == 0.8.*
+      , hedis       >= 0.6
+      , redis-io
+      , redis-resp
+      , tinylog
+      , transformers
