@@ -23,7 +23,7 @@ import Network.Redis.IO.Lazy
 import Network.Redis.IO.Settings
 import Network.Redis.IO.Timeouts (TimeoutManager)
 import Network.Redis.IO.Types (ConnectionError (..))
-import System.Logger.Class hiding (Settings, settings)
+import System.Logger.Class hiding (Settings, Error, settings)
 
 import qualified Data.Pool                   as P
 import qualified Network.Redis.IO.Connection as C
@@ -114,7 +114,7 @@ run h c = do
 
 getResult :: Connection -> Resp -> (Resp -> Result a) -> IO (Lazy (Result a))
 getResult h x g = do
-    r <- newIORef undefined
+    r <- newIORef (Left $ Error "missing response")
     f <- lazy $ C.sync h >> either Left g <$> readIORef r
     C.request x r h
     return f
