@@ -2,8 +2,10 @@
 
 module Main (main) where
 
+import Control.Monad.IO.Class
 import Criterion
 import Criterion.Main
+import Data.ByteString
 import Data.Monoid
 import Data.Redis
 import Network.Redis.IO
@@ -16,14 +18,14 @@ main = do
     g <- Logger.new Logger.defSettings
     p <- mkPool g (setMaxConnections 50 . setPoolStripes 1 $ defSettings)
     h <- Hedis.connect Hedis.defaultConnectInfo
-    defaultMainWith defaultConfig (return ())
+    defaultMain
         [ bgroup "ping"
-            [ bench "hedis" $ runPingH h
-            , bench "redis-io" $ runPing p
+            [ bench "hedis"    $ nfIO (runPingH h)
+            , bench "redis-io" $ nfIO (runPing p)
             ]
         , bgroup "get-and-set"
-            [ bench "hedis" $ runGetSetH h
-            , bench "redis-io" $ runSetGet p
+            [ bench "hedis"    $ nfIO (runGetSetH h)
+            , bench "redis-io" $ nfIO (runSetGet p)
             ]
         ]
     shutdown p
@@ -74,7 +76,7 @@ runSetGet p = do
         set "hello8" "world" mempty
         set "hello9" "world" mempty
         set "hello0" "world" mempty
-        get "hello5"
+        get "hello5" :: Redis IO (Lazy (Result ByteString))
     x `seq` return ()
 
 runGetSetH :: Hedis.Connection -> IO ()

@@ -2,6 +2,7 @@
 -- License, v. 2.0. If a copy of the MPL was not distributed with this
 -- file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+{-# LANGUAGE GADTs                      #-}
 {-# LANGUAGE OverloadedStrings          #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
@@ -10,8 +11,8 @@ module Network.Redis.IO.Client where
 import Control.Applicative
 import Control.Exception (throwIO)
 import Control.Monad.Catch
+import Control.Monad.Operational
 import Control.Monad.Reader
-import Control.Monad.Trans.Free
 import Data.IORef
 import Data.Redis
 import Data.Redis.Command
@@ -79,10 +80,10 @@ shutdown p = liftIO $ P.destroyAllResources (connPool p)
 runClient :: MonadIO m => Pool -> Client a -> m a
 runClient p a = liftIO $ runReaderT (client a) p
 
-runRedis :: MonadIO m => Pool -> FreeT Command IO a -> m a
+runRedis :: MonadIO m => Pool -> Redis IO a -> m a
 runRedis p = runClient p . request
 
-request :: FreeT Command IO a -> Client a
+request :: Redis IO a -> Client a
 request a = do
     p <- ask
     let c = connPool p
@@ -101,14 +102,15 @@ request a = do
             throwIO ConnectionsBusy
         withResource c (go p)
 
-run :: Connection -> FreeT Command IO a -> IO a
+run :: Connection -> Redis IO a -> IO a
 run h c = do
-    a <- runFreeT c
-    case a of
-        Free (Ping x k) -> getResult h x fromPing >>= run h . k
-        Free (Get  x k) -> getResult h x fromGet  >>= run h . k
-        Free (Set  x k) -> getResult h x fromSet  >>= run h . k
-        Pure x           -> return x
+    r <- viewT c
+    case r of
+        Return a       -> return a
+        Ping  x :>>= k -> getResult h x fromPing >>= run h . k
+        Get   x :>>= k -> getResult h x fromGet  >>= run h . k
+        Set   x :>>= k -> getResult h x fromSet  >>= run h . k
+        Await f :>>= k -> force f >>= run h . k
 
 getResult :: Connection -> Resp -> (Resp -> Result a) -> IO (Lazy (Result a))
 getResult h x g = do
