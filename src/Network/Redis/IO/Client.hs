@@ -19,6 +19,7 @@ import Data.Redis.Command
 import Data.Word
 import Data.Pool hiding (Pool)
 import Network.Redis.IO.Connection (Connection)
+import Network.Redis.IO.Lazy
 import Network.Redis.IO.Settings
 import Network.Redis.IO.Timeouts (TimeoutManager)
 import Network.Redis.IO.Types (ConnectionError (..))
@@ -80,10 +81,10 @@ shutdown p = liftIO $ P.destroyAllResources (connPool p)
 runClient :: MonadIO m => Pool -> Client a -> m a
 runClient p a = liftIO $ runReaderT (client a) p
 
-runRedis :: MonadIO m => Pool -> Redis IO a -> m a
+runRedis :: MonadIO m => Pool -> Redis Lazy IO a -> m a
 runRedis p = runClient p . request
 
-request :: Redis IO a -> Client a
+request :: Redis Lazy IO a -> Client a
 request a = do
     p <- ask
     let c = connPool p
@@ -102,7 +103,7 @@ request a = do
             throwIO ConnectionsBusy
         withResource c (go p)
 
-run :: Connection -> Redis IO a -> IO a
+run :: Connection -> Redis Lazy IO a -> IO a
 run h c = do
     r <- viewT c
     case r of
@@ -110,7 +111,6 @@ run h c = do
         Ping  x :>>= k -> getResult h x fromPing >>= run h . k
         Get   x :>>= k -> getResult h x fromGet  >>= run h . k
         Set   x :>>= k -> getResult h x fromSet  >>= run h . k
-        Await f :>>= k -> force f >>= run h . k
 
 getResult :: Connection -> Resp -> (Resp -> Result a) -> IO (Lazy (Result a))
 getResult h x g = do

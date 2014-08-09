@@ -23,6 +23,10 @@ module Network.Redis.IO
     , runRedis
     , request
 
+    , Lazy
+    , lazy
+    , force
+
     -- * Exceptions
     , ConnectionError (..)
     , InternalError   (..)
@@ -30,5 +34,6 @@ module Network.Redis.IO
     ) where
 
 import Network.Redis.IO.Client
+import Network.Redis.IO.Lazy
 import Network.Redis.IO.Settings
 import Network.Redis.IO.Types
