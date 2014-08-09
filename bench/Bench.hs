@@ -2,16 +2,10 @@
 
 module Main (main) where
 
-import Control.Monad
-import Control.Monad.IO.Class
 import Criterion
-import Criterion.Config
 import Criterion.Main
-import Data.ByteString (ByteString)
-import Data.IORef
 import Data.Monoid
-import Data.Redis.Command
-import Data.Redis.Resp
+import Data.Redis
 import Network.Redis.IO
 
 import qualified Database.Redis as Hedis
@@ -36,38 +30,40 @@ main = do
     Logger.close g
 
 runPing :: Pool -> IO ()
-runPing p = runClient p $ request $ do
-    ping
-    ping
-    ping
-    ping
-    ping
-    ping
-    ping
-    ping
-    ping
-    ping
-    ping
-    return ()
+runPing p = do
+    x <- runRedis p $ do
+        ping
+        ping
+        ping
+        ping
+        ping
+        ping
+        ping
+        ping
+        ping
+        ping
+        ping
+    x `seq` return ()
 
 runPingH :: Hedis.Connection -> IO ()
-runPingH p = Hedis.runRedis p $ do
-    Hedis.ping
-    Hedis.ping
-    Hedis.ping
-    Hedis.ping
-    Hedis.ping
-    Hedis.ping
-    Hedis.ping
-    Hedis.ping
-    Hedis.ping
-    Hedis.ping
-    Hedis.ping
-    return ()
+runPingH p = do
+    x <- Hedis.runRedis p $ do
+        Hedis.ping
+        Hedis.ping
+        Hedis.ping
+        Hedis.ping
+        Hedis.ping
+        Hedis.ping
+        Hedis.ping
+        Hedis.ping
+        Hedis.ping
+        Hedis.ping
+        Hedis.ping
+    x `seq` return ()
 
-runSetGet :: Pool -> IO Resp
+runSetGet :: Pool -> IO ()
 runSetGet p = do
-    x <- runClient p $ request $ do
+    x <- runRedis p $ do
         set "hello1" "world" mempty
         set "hello2" "world" mempty
         set "hello3" "world" mempty
@@ -79,11 +75,11 @@ runSetGet p = do
         set "hello9" "world" mempty
         set "hello0" "world" mempty
         get "hello5"
-    readIORef x
+    x `seq` return ()
 
-runGetSetH :: Hedis.Connection -> IO (Maybe ByteString)
+runGetSetH :: Hedis.Connection -> IO ()
 runGetSetH p = do
-    Right (Just x) <- Hedis.runRedis p $ do
+    x <- Hedis.runRedis p $ do
         Hedis.set "helloA" "world"
         Hedis.set "helloB" "world"
         Hedis.set "helloC" "world"
@@ -96,4 +92,4 @@ runGetSetH p = do
         Hedis.set "helloJ" "world"
         Hedis.set "helloK" "world"
         Hedis.get "helloG"
-    return (Just x)
+    x `seq` return ()

@@ -59,12 +59,9 @@ benchmark redis-io-bench
     hs-source-dirs:   bench
     ghc-options:      -Wall -O2 -fwarn-tabs
     build-depends:
-        async
-      , base
-      , bytestring
-      , criterion   == 0.8.*
+        base
+      , criterion   >= 1.0.0.2 && < 1.1
       , hedis       >= 0.6
       , redis-io
       , redis-resp
       , tinylog
-      , transformers

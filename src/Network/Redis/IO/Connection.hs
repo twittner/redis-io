@@ -16,13 +16,14 @@ module Network.Redis.IO.Connection
 import Control.Applicative
 import Control.Exception
 import Control.Monad
-import Data.Attoparsec.ByteString
+import Data.Attoparsec.ByteString hiding (Result)
 import Data.ByteString (ByteString)
+import Data.ByteString.Char8 (isPrefixOf)
 import Data.ByteString.Lazy (toChunks)
 import Data.Foldable hiding (concatMap)
 import Data.IORef
 import Data.Maybe (isJust)
-import Data.Redis.Resp
+import Data.Redis
 import Data.Sequence (Seq, (|>))
 import Data.Word
 import Network
@@ -31,7 +32,7 @@ import Network.Redis.IO.Types
 import Network.Redis.IO.Timeouts (TimeoutManager, withTimeout)
 import Network.Socket hiding (connect, close, recv)
 import Network.Socket.ByteString (recv, sendMany)
-import System.Logger hiding (Settings, settings, close)
+import System.Logger hiding (Settings, Error, settings, close)
 import System.Timeout
 
 import qualified Data.Sequence  as Seq
@@ -43,7 +44,7 @@ data Connection = Connection
     , timeouts :: !TimeoutManager
     , sock     :: !Socket
     , leftover :: IORef ByteString
-    , buffer   :: IORef (Seq (Resp, IORef Resp))
+    , buffer   :: IORef (Seq (Resp, IORef (Result Resp)))
     }
 
 instance Show Connection where
@@ -67,13 +68,14 @@ connect t g m a = bracketOnError mkSock S.close $ \s -> do
 close :: Connection -> IO ()
 close = S.close . sock
 
-request :: Resp -> IORef Resp -> Connection -> IO ()
+request :: Resp -> IORef (Result Resp) -> Connection -> IO ()
 request x y c = modifyIORef' (buffer c) (|> (x, y))
 
 sync :: Connection -> IO ()
 sync c = do
-    a <- atomicModifyIORef' (buffer c) (\r -> (Seq.empty, r))
-    unless (Seq.null a) $
+    a <- readIORef (buffer c)
+    unless (Seq.null a) $ do
+        writeIORef (buffer c) Seq.empty
         withTimeout (timeouts c) (sSendRecvTimeout (settings c)) abort $ do
             sendMany (sock c) $
                 concatMap (toChunks . encode) (toList $ fmap fst a)
@@ -85,10 +87,16 @@ sync c = do
         close c
         throwIO $ Timeout (show c)
 
-    fetchResult :: ByteString -> IORef Resp -> IO ByteString
+    fetchResult :: ByteString -> IORef (Result Resp) -> IO ByteString
     fetchResult b r = do
         res <- parseWith (recv (sock c) 4096) resp b
         case res of
             Fail    _ _ m -> throwIO $ InternalError m
             Partial _     -> throwIO $ InternalError "partial result"
-            Done    b'  x -> writeIORef r x >> return b'
+            Done    b'  x -> writeIORef r (fromResp x) >> return b'
+
+fromResp :: Resp -> (Result Resp)
+fromResp (Err e)
+    | "WRONGTYPE" `isPrefixOf` e = Left WrongType
+    | otherwise                  = Left $ Error e
+fromResp r = Right r

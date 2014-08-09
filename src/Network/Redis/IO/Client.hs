@@ -11,8 +11,9 @@ import Control.Applicative
 import Control.Exception (throwIO)
 import Control.Monad.Catch
 import Control.Monad.Reader
-import Control.Monad.Free
+import Control.Monad.Trans.Free
 import Data.IORef
+import Data.Redis
 import Data.Redis.Command
 import Data.Word
 import Data.Pool hiding (Pool)
@@ -78,7 +79,10 @@ shutdown p = liftIO $ P.destroyAllResources (connPool p)
 runClient :: MonadIO m => Pool -> Client a -> m a
 runClient p a = liftIO $ runReaderT (client a) p
 
-request :: Free Command a -> Client a
+runRedis :: MonadIO m => Pool -> FreeT Command IO a -> m a
+runRedis p = runClient p . request
+
+request :: FreeT Command IO a -> Client a
 request a = do
     p <- ask
     let c = connPool p
@@ -97,18 +101,19 @@ request a = do
             throwIO ConnectionsBusy
         withResource c (go p)
 
-run :: Connection -> Free Command a -> IO a
-run h a = case a of
-    Free (Ping x k) -> do
-        r <- newIORef undefined
-        C.request x r h
-        run h (k r)
-    Free (Get x k) -> do
-        r <- newIORef undefined
-        C.request x r h
-        run h (k r)
-    Free (Set x k) -> do
-        r <- newIORef undefined
-        C.request x r h
-        run h (k r)
-    Pure x         -> return x
+run :: Connection -> FreeT Command IO a -> IO a
+run h c = do
+    a <- runFreeT c
+    case a of
+        Free (Ping x k) -> getResult h x fromPing >>= run h . k
+        Free (Get  x k) -> getResult h x fromGet  >>= run h . k
+        Free (Set  x k) -> getResult h x fromSet  >>= run h . k
+        Pure x           -> return x
+
+getResult :: Connection -> Resp -> (Resp -> Result a) -> IO (Lazy (Result a))
+getResult h x g = do
+    r <- newIORef undefined
+    f <- lazy $ C.sync h >> either Left g <$> readIORef r
+    C.request x r h
+    return f
+{-# INLINE getResult #-}

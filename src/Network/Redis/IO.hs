@@ -20,6 +20,7 @@ module Network.Redis.IO
 
     , Client
     , runClient
+    , runRedis
     , request
 
     -- * Exceptions
