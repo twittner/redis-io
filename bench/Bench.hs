@@ -2,7 +2,8 @@
 
 module Main (main) where
 
-import Control.Monad.IO.Class
+import Control.Applicative
+import Control.Monad
 import Criterion
 import Criterion.Main
 import Data.ByteString
@@ -15,83 +16,54 @@ import qualified System.Logger  as Logger
 
 main :: IO ()
 main = do
-    g <- Logger.new Logger.defSettings
+    g <- Logger.new (Logger.setLogLevel Logger.Error Logger.defSettings)
     p <- mkPool g (setMaxConnections 50 . setPoolStripes 1 $ defSettings)
     h <- Hedis.connect Hedis.defaultConnectInfo
     defaultMain
         [ bgroup "ping"
-            [ bench "hedis"    $ nfIO (runPingH h)
-            , bench "redis-io" $ nfIO (runPing p)
+            [ bench "hedis 1"      $ nfIO (runPingH 1 h)
+            , bench "redis-io 1"   $ nfIO (runPing  1 p)
+            , bench "hedis 4"      $ nfIO (runPingH 4 h)
+            , bench "redis-io 4"   $ nfIO (runPing  4 p)
+            , bench "hedis 10"     $ nfIO (runPingH 10 h)
+            , bench "redis-io 10"  $ nfIO (runPing  10 p)
+            , bench "hedis 100"    $ nfIO (runPingH 100 h)
+            , bench "redis-io 100" $ nfIO (runPing  100 p)
             ]
         , bgroup "get-and-set"
-            [ bench "hedis"    $ nfIO (runGetSetH h)
-            , bench "redis-io" $ nfIO (runSetGet p)
+            [ bench "hedis 1"      $ nfIO (runGetSetH 1 h)
+            , bench "redis-io 1"   $ nfIO (runSetGet 1 p)
+            , bench "hedis 4"      $ nfIO (runGetSetH 4 h)
+            , bench "redis-io 4"   $ nfIO (runSetGet 4 p)
+            , bench "hedis 10"     $ nfIO (runGetSetH 10 h)
+            , bench "redis-io 10"  $ nfIO (runSetGet 10 p)
+            , bench "hedis 100"    $ nfIO (runGetSetH 100 h)
+            , bench "redis-io 100" $ nfIO (runSetGet 100 p)
             ]
         ]
     shutdown p
     Logger.close g
 
-runPing :: Pool -> IO ()
-runPing p = do
+runPing :: Int -> Pool -> IO ()
+runPing n p = do
+    x <- runRedis p $ Prelude.last <$> replicateM n ping
+    x `seq` return ()
+
+runPingH :: Int -> Hedis.Connection -> IO ()
+runPingH n p = do
+    x <- Hedis.runRedis p $ Prelude.last <$> replicateM n Hedis.ping
+    x `seq` return ()
+
+runSetGet :: Int -> Pool -> IO ()
+runSetGet n p = do
     x <- runRedis p $ do
-        ping
-        ping
-        ping
-        ping
-        ping
-        ping
-        ping
-        ping
-        ping
-        ping
-        ping
+        replicateM_ n $ set "hello" "world" mempty
+        get "hello" :: Redis IO (Lazy (Result ByteString))
     x `seq` return ()
 
-runPingH :: Hedis.Connection -> IO ()
-runPingH p = do
+runGetSetH :: Int -> Hedis.Connection -> IO ()
+runGetSetH n p = do
     x <- Hedis.runRedis p $ do
-        Hedis.ping
-        Hedis.ping
-        Hedis.ping
-        Hedis.ping
-        Hedis.ping
-        Hedis.ping
-        Hedis.ping
-        Hedis.ping
-        Hedis.ping
-        Hedis.ping
-        Hedis.ping
-    x `seq` return ()
-
-runSetGet :: Pool -> IO ()
-runSetGet p = do
-    x <- runRedis p $ do
-        set "hello1" "world" mempty
-        set "hello2" "world" mempty
-        set "hello3" "world" mempty
-        set "hello4" "world" mempty
-        set "hello5" "world" mempty
-        set "hello6" "world" mempty
-        set "hello7" "world" mempty
-        set "hello8" "world" mempty
-        set "hello9" "world" mempty
-        set "hello0" "world" mempty
-        get "hello5" :: Redis IO (Lazy (Result ByteString))
-    x `seq` return ()
-
-runGetSetH :: Hedis.Connection -> IO ()
-runGetSetH p = do
-    x <- Hedis.runRedis p $ do
-        Hedis.set "helloA" "world"
-        Hedis.set "helloB" "world"
-        Hedis.set "helloC" "world"
-        Hedis.set "helloD" "world"
-        Hedis.set "helloE" "world"
-        Hedis.set "helloF" "world"
-        Hedis.set "helloG" "world"
-        Hedis.set "helloH" "world"
-        Hedis.set "helloI" "world"
-        Hedis.set "helloJ" "world"
-        Hedis.set "helloK" "world"
-        Hedis.get "helloG"
+        replicateM_ n $ Hedis.set "world" "hello"
+        Hedis.get "world"
     x `seq` return ()
