@@ -18,7 +18,6 @@ import Control.Exception
 import Control.Monad
 import Data.Attoparsec.ByteString hiding (Result)
 import Data.ByteString (ByteString)
-import Data.ByteString.Char8 (isPrefixOf)
 import Data.ByteString.Lazy (toChunks)
 import Data.Foldable hiding (concatMap)
 import Data.IORef
@@ -32,7 +31,7 @@ import Network.Redis.IO.Types
 import Network.Redis.IO.Timeouts (TimeoutManager, withTimeout)
 import Network.Socket hiding (connect, close, recv)
 import Network.Socket.ByteString (recv, sendMany)
-import System.Logger hiding (Settings, Error, settings, close)
+import System.Logger hiding (Settings, settings, close)
 import System.Timeout
 
 import qualified Data.Sequence  as Seq
@@ -96,7 +95,5 @@ sync c = do
             Done    b'  x -> writeIORef r (fromResp x) >> return b'
 
 fromResp :: Resp -> (Result Resp)
-fromResp (Err e)
-    | "WRONGTYPE" `isPrefixOf` e = Left WrongType
-    | otherwise                  = Left $ Error e
-fromResp r = Right r
+fromResp (Err e) = Left $ RedisError e
+fromResp r       = Right r

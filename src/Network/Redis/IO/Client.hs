@@ -9,7 +9,7 @@
 module Network.Redis.IO.Client where
 
 import Control.Applicative
-import Control.Exception (throwIO)
+import Control.Exception (throw, throwIO)
 import Control.Monad.Catch
 import Control.Monad.Operational
 import Control.Monad.Reader
@@ -23,7 +23,8 @@ import Network.Redis.IO.Lazy
 import Network.Redis.IO.Settings
 import Network.Redis.IO.Timeouts (TimeoutManager)
 import Network.Redis.IO.Types (ConnectionError (..))
-import System.Logger.Class hiding (Settings, Error, settings)
+import Prelude hiding (readList)
+import System.Logger.Class hiding (Settings, settings)
 
 import qualified Data.Pool                   as P
 import qualified Network.Redis.IO.Connection as C
@@ -107,15 +108,55 @@ run :: Connection -> Redis Lazy IO a -> IO a
 run h c = do
     r <- viewT c
     case r of
-        Return a       -> return a
-        Ping  x :>>= k -> getResult h x fromPing >>= run h . k
-        Get   x :>>= k -> getResult h x fromGet  >>= run h . k
-        Set   x :>>= k -> getResult h x fromSet  >>= run h . k
+        Return      a          -> return a
+        Ping          x :>>= k -> getResult h x (matchStr "PING" "PONG")          >>= run h . k
+        Echo          x :>>= k -> getResult h x (readBulk' "ECHO")                >>= run h . k
+        Quit          x :>>= k -> getResult h x (matchStr "QUIT" "OK")            >>= run h . k
+        Select        x :>>= k -> getResult h x (matchStr "SELECT" "OK")          >>= run h . k
+        BgRewriteAOF  x :>>= k -> getResult h x (matchStr "BGREWRITEAOF" "OK")    >>= run h . k
+        Auth          x :>>= k -> getResult h x (matchStr "AUTH" "OK")            >>= run h . k
+        Get           x :>>= k -> getResult h x (readBulk "GET")                  >>= run h . k
+        GetSet        x :>>= k -> getResult h x (readBulk "GETSET")               >>= run h . k
+        GetRange      x :>>= k -> getResult h x (readBulk' "GETRANGE")            >>= run h . k
+        MGet          x :>>= k -> getResult h x (readList "MGET")                 >>= run h . k
+        Set           x :>>= k -> getResult h x fromSet                           >>= run h . k
+        SetRange      x :>>= k -> getResult h x (readInt "SETRANGE")              >>= run h . k
+        MSet          x :>>= k -> getResult h x (matchStr "MSET" "OK")            >>= run h . k
+        MSetNx        x :>>= k -> getResult h x (readBool "MSETNX")               >>= run h . k
+        Append        x :>>= k -> getResult h x (readInt "APPEND")                >>= run h . k
+        StrLen        x :>>= k -> getResult h x (readInt "STRLEN")                >>= run h . k
+        BitCount      x :>>= k -> getResult h x (readInt "BITCOUNT")              >>= run h . k
+        BitAnd        x :>>= k -> getResult h x (readInt "BITOP")                 >>= run h . k
+        BitOr         x :>>= k -> getResult h x (readInt "BITOP")                 >>= run h . k
+        BitXOr        x :>>= k -> getResult h x (readInt "BITOP")                 >>= run h . k
+        BitNot        x :>>= k -> getResult h x (readInt "BITOP")                 >>= run h . k
+        BitPos        x :>>= k -> getResult h x (readInt "BITPOS")                >>= run h . k
+        Keys          x :>>= k -> getResult h x (readList' "KEYS")                >>= run h . k
+        RandomKey     x :>>= k -> getResult h x (readBulk "RANDOMKEY")            >>= run h . k
+        Rename        x :>>= k -> getResult h x (matchStr "RENAME" "OK")          >>= run h . k
+        RenameNx      x :>>= k -> getResult h x (readBool "RENAMENX")             >>= run h . k
+        Sort          x :>>= k -> getResult h x (readList' "SORT")                >>= run h . k
+        Ttl           x :>>= k -> getResult h x (readTTL "TTL")                   >>= run h . k
+        Type          x :>>= k -> getResult h x (readType "TYPE")                 >>= run h . k
+        Scan          x :>>= k -> getResult h x (readScan "SCAN")                 >>= run h . k
+        Del           x :>>= k -> getResult h x (readInt "DEL")                   >>= run h . k
+        HDel          x :>>= k -> getResult h x (readInt "HDEL")                  >>= run h . k
+        HGetAll       x :>>= k -> getResult h x (readFields "HGETALL")            >>= run h . k
+        LSet          x :>>= k -> getResult h x (matchStr "LSET" "OK")            >>= run h . k
+        BLPop         x :>>= k -> getResult h x (readKeyValue "BLPOP")            >>= run h . k
+        SRandMember a x :>>= k -> getResult h x (readBulkOrArray "SRANDMEMBER" a) >>= run h . k
+        ZInterStore   x :>>= k -> getResult h x (readInt "ZINTERSTORE")           >>= run h . k
+        ZRange      a x :>>= k -> getResult h x (readScoreList "ZRANGE" a)        >>= run h . k
+        ZRangeByLex   x :>>= k -> getResult h x (readList' "ZRANGEBYLEX")         >>= run h . k
 
 getResult :: Connection -> Resp -> (Resp -> Result a) -> IO (Lazy (Result a))
 getResult h x g = do
-    r <- newIORef (Left $ Error "missing response")
+    r <- newIORef (Left $ RedisError "missing response")
     f <- lazy $ C.sync h >> either Left g <$> readIORef r
     C.request x r h
     return f
 {-# INLINE getResult #-}
+
+peel :: Redis Lazy IO (Lazy (Result a)) -> Redis Lazy IO a
+peel r = r >>= force >>= either throw return
+{-# INLINE peel #-}

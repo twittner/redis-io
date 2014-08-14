@@ -58,7 +58,7 @@ runSetGet :: Int -> Pool -> IO ()
 runSetGet n p = do
     x <- runRedis p $ do
         replicateM_ n $ set "hello" "world" mempty
-        get "hello" :: Redis Lazy IO (Lazy (Result ByteString))
+        get "hello" :: Redis Lazy IO (Lazy (Result (Maybe ByteString)))
     x `seq` return ()
 
 runGetSetH :: Int -> Hedis.Connection -> IO ()
