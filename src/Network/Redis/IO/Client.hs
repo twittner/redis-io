@@ -13,6 +13,7 @@ import Control.Exception (throw, throwIO)
 import Control.Monad.Catch
 import Control.Monad.Operational
 import Control.Monad.Reader
+import Data.Int
 import Data.IORef
 import Data.Redis
 import Data.Word
@@ -195,23 +196,23 @@ run h c = do
         HScan        x :>>= k -> getResult h x (readScan "HSCAN")         >>= run h . k
 
         -- Lists
-        BLPop      x :>>= k -> getResult h x (readKeyValue "BLPOP")       >>= run h . k
-        BRPop      x :>>= k -> getResult h x (readKeyValue "BRPOP")       >>= run h . k
-        BRPopLPush x :>>= k -> getResult h x (readBulk'Null "BRPOPLPUSH") >>= run h . k
-        LIndex     x :>>= k -> getResult h x (readBulk'Null "LINDEX")     >>= run h . k
-        LInsert    x :>>= k -> getResult h x (readInt "LINSERT")          >>= run h . k
-        LLen       x :>>= k -> getResult h x (readInt "LLEN")             >>= run h . k
-        LPop       x :>>= k -> getResult h x (readBulk'Null "LPOP")       >>= run h . k
-        LPush      x :>>= k -> getResult h x (readInt "LPUSH")            >>= run h . k
-        LPushNx    x :>>= k -> getResult h x (readInt "LPUSHNX")          >>= run h . k
-        LRange     x :>>= k -> getResult h x (readList "LRANGE")          >>= run h . k
-        LRem       x :>>= k -> getResult h x (readInt "LREM")             >>= run h . k
-        LSet       x :>>= k -> getResult h x (matchStr "LSET" "OK")       >>= run h . k
-        LTrim      x :>>= k -> getResult h x (matchStr "LTRIM" "OK")      >>= run h . k
-        RPop       x :>>= k -> getResult h x (readBulk'Null "RPOP")       >>= run h . k
-        RPopLPush  x :>>= k -> getResult h x (readBulk'Null "RPOPLPUSH")  >>= run h . k
-        RPush      x :>>= k -> getResult h x (readInt "RPUSH")            >>= run h . k
-        RPushNx    x :>>= k -> getResult h x (readInt "RPUSHNX")          >>= run h . k
+        BLPop      t x :>>= k -> getNow (withTimeout t h) x (readKeyValue "BLPOP")       >>= run h . k
+        BRPop      t x :>>= k -> getNow (withTimeout t h) x (readKeyValue "BRPOP")       >>= run h . k
+        BRPopLPush t x :>>= k -> getNow (withTimeout t h) x (readBulk'Null "BRPOPLPUSH") >>= run h . k
+        LIndex       x :>>= k -> getResult h              x (readBulk'Null "LINDEX")     >>= run h . k
+        LInsert      x :>>= k -> getResult h              x (readInt "LINSERT")          >>= run h . k
+        LLen         x :>>= k -> getResult h              x (readInt "LLEN")             >>= run h . k
+        LPop         x :>>= k -> getResult h              x (readBulk'Null "LPOP")       >>= run h . k
+        LPush        x :>>= k -> getResult h              x (readInt "LPUSH")            >>= run h . k
+        LPushNx      x :>>= k -> getResult h              x (readInt "LPUSHNX")          >>= run h . k
+        LRange       x :>>= k -> getResult h              x (readList "LRANGE")          >>= run h . k
+        LRem         x :>>= k -> getResult h              x (readInt "LREM")             >>= run h . k
+        LSet         x :>>= k -> getResult h              x (matchStr "LSET" "OK")       >>= run h . k
+        LTrim        x :>>= k -> getResult h              x (matchStr "LTRIM" "OK")      >>= run h . k
+        RPop         x :>>= k -> getResult h              x (readBulk'Null "RPOP")       >>= run h . k
+        RPopLPush    x :>>= k -> getResult h              x (readBulk'Null "RPOPLPUSH")  >>= run h . k
+        RPush        x :>>= k -> getResult h              x (readInt "RPUSH")            >>= run h . k
+        RPushNx      x :>>= k -> getResult h              x (readInt "RPUSHNX")          >>= run h . k
 
         -- Sets
         SAdd          x :>>= k -> getResult h x (readInt "SADD")                 >>= run h . k
@@ -264,6 +265,22 @@ getResult h x g = do
     C.request x r h
     return f
 {-# INLINE getResult #-}
+
+-- Like 'getResult' but triggers immediate execution.
+getNow :: Connection -> Resp -> (Resp -> Result a) -> IO (Lazy (Result a))
+getNow h x g = do
+    r <- newIORef (Left $ RedisError "missing response")
+    C.request x r h
+    C.sync h
+    lazy $ either Left g <$> readIORef r
+{-# INLINE getNow #-}
+
+-- Update a 'Connection's send/recv timeout. Values > 0 get an additional
+-- 10s grace period added to give redis enough time to finish first.
+withTimeout :: Int64 -> Connection -> Connection
+withTimeout 0 c = c { C.settings = setSendRecvTimeout 0                     (C.settings c) }
+withTimeout t c = c { C.settings = setSendRecvTimeout (10 + fromIntegral t) (C.settings c) }
+{-# INLINE withTimeout #-}
 
 peel :: Redis Lazy IO (Lazy (Result a)) -> Redis Lazy IO a
 peel r = r >>= force >>= either throw return

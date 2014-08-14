@@ -6,6 +6,7 @@
 
 module Network.Redis.IO.Connection
     ( Connection
+    , settings
     , resolve
     , connect
     , close
@@ -75,12 +76,16 @@ sync c = do
     a <- readIORef (buffer c)
     unless (Seq.null a) $ do
         writeIORef (buffer c) Seq.empty
-        withTimeout (timeouts c) (sSendRecvTimeout (settings c)) abort $ do
-            sendMany (sock c) $
-                concatMap (toChunks . encode) (toList $ fmap fst a)
-            bb <- readIORef (leftover c)
-            foldlM fetchResult bb (fmap snd a) >>= writeIORef (leftover c)
+        case sSendRecvTimeout (settings c) of
+            0 -> go a
+            t -> withTimeout (timeouts c) t abort (go a)
   where
+    go a = do
+        sendMany (sock c) $
+            concatMap (toChunks . encode) (toList $ fmap fst a)
+        bb <- readIORef (leftover c)
+        foldlM fetchResult bb (fmap snd a) >>= writeIORef (leftover c)
+
     abort = do
         err (logger c) $ "connection.timeout" .= show c
         close c
