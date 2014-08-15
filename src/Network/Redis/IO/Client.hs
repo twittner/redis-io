@@ -172,11 +172,11 @@ run h c = do
         SetBit   x :>>= k -> getResult h x (readInt "SETBIT")   >>= run h . k
 
         -- Numeric
-        Decr        x :>>= k -> getResult h x (readInt "DECR")        >>= run h . k
-        DecrBy      x :>>= k -> getResult h x (readInt "DECRBY")      >>= run h . k
-        Incr        x :>>= k -> getResult h x (readInt "INCR")        >>= run h . k
-        IncrBy      x :>>= k -> getResult h x (readInt "INCRBY")      >>= run h . k
-        IncrByFloat x :>>= k -> getResult h x (readDbl "INCRBYFLOAT") >>= run h . k
+        Decr        x :>>= k -> getResult h x (readInt "DECR")         >>= run h . k
+        DecrBy      x :>>= k -> getResult h x (readInt "DECRBY")       >>= run h . k
+        Incr        x :>>= k -> getResult h x (readInt "INCR")         >>= run h . k
+        IncrBy      x :>>= k -> getResult h x (readInt "INCRBY")       >>= run h . k
+        IncrByFloat x :>>= k -> getResult h x (readBulk "INCRBYFLOAT") >>= run h . k
 
         -- Hashes
         HDel         x :>>= k -> getResult h x (readInt "HDEL")           >>= run h . k
@@ -184,7 +184,7 @@ run h c = do
         HGet         x :>>= k -> getResult h x (readBulk'Null "HGET")     >>= run h . k
         HGetAll      x :>>= k -> getResult h x (readFields "HGETALL")     >>= run h . k
         HIncrBy      x :>>= k -> getResult h x (readInt "HINCRBY")        >>= run h . k
-        HIncrByFloat x :>>= k -> getResult h x (readDbl "HINCRBYFLOAT")   >>= run h . k
+        HIncrByFloat x :>>= k -> getResult h x (readBulk "HINCRBYFLOAT")  >>= run h . k
         HKeys        x :>>= k -> getResult h x (readList "HKEYS")         >>= run h . k
         HLen         x :>>= k -> getResult h x (readInt "HLEN")           >>= run h . k
         HMGet        x :>>= k -> getResult h x (readListOfMaybes "HMGET") >>= run h . k
@@ -203,7 +203,7 @@ run h c = do
         LLen         x :>>= k -> getResult h              x (readInt "LLEN")             >>= run h . k
         LPop         x :>>= k -> getResult h              x (readBulk'Null "LPOP")       >>= run h . k
         LPush        x :>>= k -> getResult h              x (readInt "LPUSH")            >>= run h . k
-        LPushNx      x :>>= k -> getResult h              x (readInt "LPUSHNX")          >>= run h . k
+        LPushX       x :>>= k -> getResult h              x (readInt "LPUSHX")           >>= run h . k
         LRange       x :>>= k -> getResult h              x (readList "LRANGE")          >>= run h . k
         LRem         x :>>= k -> getResult h              x (readInt "LREM")             >>= run h . k
         LSet         x :>>= k -> getResult h              x (matchStr "LSET" "OK")       >>= run h . k
@@ -211,7 +211,7 @@ run h c = do
         RPop         x :>>= k -> getResult h              x (readBulk'Null "RPOP")       >>= run h . k
         RPopLPush    x :>>= k -> getResult h              x (readBulk'Null "RPOPLPUSH")  >>= run h . k
         RPush        x :>>= k -> getResult h              x (readInt "RPUSH")            >>= run h . k
-        RPushNx      x :>>= k -> getResult h              x (readInt "RPUSHNX")          >>= run h . k
+        RPushX       x :>>= k -> getResult h              x (readInt "RPUSHX")           >>= run h . k
 
         -- Sets
         SAdd          x :>>= k -> getResult h x (readInt "SADD")                 >>= run h . k
@@ -234,7 +234,7 @@ run h c = do
         ZAdd               x :>>= k -> getResult h x (readInt "ZADD")                     >>= run h . k
         ZCard              x :>>= k -> getResult h x (readInt "ZCARD")                    >>= run h . k
         ZCount             x :>>= k -> getResult h x (readInt "ZCOUNT")                   >>= run h . k
-        ZIncrBy            x :>>= k -> getResult h x (readDbl "ZINCRBY")                  >>= run h . k
+        ZIncrBy            x :>>= k -> getResult h x (readBulk "ZINCRBY")                 >>= run h . k
         ZInterStore        x :>>= k -> getResult h x (readInt "ZINTERSTORE")              >>= run h . k
         ZLexCount          x :>>= k -> getResult h x (readInt "ZLEXCOUNT")                >>= run h . k
         ZRange           a x :>>= k -> getResult h x (readScoreList "ZRANGE" a)           >>= run h . k
@@ -249,7 +249,7 @@ run h c = do
         ZRevRangeByScore a x :>>= k -> getResult h x (readScoreList "ZREVRANGEBYSCORE" a) >>= run h . k
         ZRevRank           x :>>= k -> getResult h x (readInt'Null  "ZREVRANK")           >>= run h . k
         ZScan              x :>>= k -> getResult h x (readScan "ZSCAN")                   >>= run h . k
-        ZScore             x :>>= k -> getResult h x (readDbl  "ZSCORE")                  >>= run h . k
+        ZScore             x :>>= k -> getResult h x (readBulk'Null "ZSCORE")             >>= run h . k
         ZUnionStore        x :>>= k -> getResult h x (readInt "ZUNIONSTORE")              >>= run h . k
 
         -- Sort
