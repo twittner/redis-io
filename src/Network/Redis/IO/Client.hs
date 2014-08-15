@@ -118,13 +118,13 @@ run h c = do
         Select x :>>= k -> getResult h x (matchStr "SELECT" "OK") >>= run h . k
 
         -- Server
-        BgRewriteAOF x :>>= k -> getResult h x (matchStr "BGREWRITEAOF" "OK") >>= run h . k
-        BgSave       x :>>= k -> getResult h x (matchStr "BGSAVE" "OK")       >>= run h . k
-        Save         x :>>= k -> getResult h x (matchStr "SAVE" "OK")         >>= run h . k
-        FlushAll     x :>>= k -> getResult h x (matchStr "FLUSHALL" "OK")     >>= run h . k
-        FlushDb      x :>>= k -> getResult h x (matchStr "FLUSHDB" "OK")      >>= run h . k
-        DbSize       x :>>= k -> getResult h x (readInt "DBSIZE")             >>= run h . k
-        LastSave     x :>>= k -> getResult h x (readInt "LASTSAVE")           >>= run h . k
+        BgRewriteAOF x :>>= k -> getResult h x (anyStr "BGREWRITEAOF")    >>= run h . k
+        BgSave       x :>>= k -> getResult h x (anyStr "BGSAVE")          >>= run h . k
+        Save         x :>>= k -> getResult h x (matchStr "SAVE" "OK")     >>= run h . k
+        FlushAll     x :>>= k -> getResult h x (matchStr "FLUSHALL" "OK") >>= run h . k
+        FlushDb      x :>>= k -> getResult h x (matchStr "FLUSHDB" "OK")  >>= run h . k
+        DbSize       x :>>= k -> getResult h x (readInt "DBSIZE")         >>= run h . k
+        LastSave     x :>>= k -> getResult h x (readInt "LASTSAVE")       >>= run h . k
 
         -- Transactions
         Multi   x :>>= k -> getResult h x (matchStr "MULTI" "OK")   >>= run h . k
@@ -145,7 +145,6 @@ run h c = do
         RandomKey x :>>= k -> getResult h x (readBulk'Null "RANDOMKEY") >>= run h . k
         Rename    x :>>= k -> getResult h x (matchStr "RENAME" "OK")    >>= run h . k
         RenameNx  x :>>= k -> getResult h x (readBool "RENAMENX")       >>= run h . k
-        Sort      x :>>= k -> getResult h x (readList "SORT")           >>= run h . k
         Ttl       x :>>= k -> getResult h x (readTTL "TTL")             >>= run h . k
         Type      x :>>= k -> getResult h x (readType "TYPE")           >>= run h . k
         Scan      x :>>= k -> getResult h x (readScan "SCAN")           >>= run h . k
@@ -253,6 +252,9 @@ run h c = do
         ZScore             x :>>= k -> getResult h x (readDbl  "ZSCORE")                  >>= run h . k
         ZUnionStore        x :>>= k -> getResult h x (readInt "ZUNIONSTORE")              >>= run h . k
 
+        -- Sort
+        Sort x :>>= k -> getResult h x (readList "SORT") >>= run h . k
+
         -- HyperLogLog
         PfAdd   x :>>= k -> getResult h x (readBool "PFADD")        >>= run h . k
         PfCount x :>>= k -> getResult h x (readInt "PFCOUNT")       >>= run h . k
@@ -282,6 +284,6 @@ withTimeout 0 c = c { C.settings = setSendRecvTimeout 0                     (C.s
 withTimeout t c = c { C.settings = setSendRecvTimeout (10 + fromIntegral t) (C.settings c) }
 {-# INLINE withTimeout #-}
 
-peel :: Redis Lazy IO (Lazy (Result a)) -> Redis Lazy IO a
-peel r = r >>= force >>= either throw return
-{-# INLINE peel #-}
+ensure :: Lazy (Result a) -> Redis Lazy IO a
+ensure r = force r >>= either throw return
+{-# INLINE ensure #-}

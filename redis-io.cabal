@@ -53,6 +53,22 @@ library
       , transformers   >= 0.3    && < 0.5
       , tinylog        == 0.10.*
 
+test-suite redis-io-tests
+    type:              exitcode-stdio-1.0
+    default-language:  Haskell2010
+    main-is:           Test.hs
+    hs-source-dirs:    test
+    ghc-options:       -Wall -O2 -fwarn-tabs
+    build-depends:
+        base
+      , bytestring
+      , redis-io
+      , redis-resp
+      , tasty        == 0.8.*
+      , tasty-hunit  == 0.8.*
+      , tinylog
+      , transformers
+
 benchmark redis-io-bench
     type:             exitcode-stdio-1.0
     default-language: Haskell2010
