@@ -13,6 +13,7 @@ import Control.Exception (throw, throwIO)
 import Control.Monad.Catch
 import Control.Monad.Operational
 import Control.Monad.Reader
+import Data.ByteString (ByteString)
 import Data.Int
 import Data.IORef
 import Data.Redis
@@ -86,23 +87,37 @@ runRedis :: MonadIO m => Pool -> Redis Lazy IO a -> m a
 runRedis p = runClient p . request
 
 request :: Redis Lazy IO a -> Client a
-request a = do
-    p <- ask
-    let c = connPool p
-        s = settings p
-    liftIO $ case sMaxWaitQueue s of
-        Nothing -> withResource c $ \h -> run h a `finally` C.sync h
-        Just  q -> tryWithResource c (go p) >>= maybe (retry q c p) return
-  where
-    go p h = do
-        atomicModifyIORef' (failures p) $ \n -> (if n > 0 then n - 1 else 0, ())
-        run h a `finally` C.sync h
+request a = withConnection (flip run a)
 
-    retry q c p = do
-        k <- atomicModifyIORef' (failures p) $ \n -> (n + 1, n)
-        unless (k < q) $
-            throwIO ConnectionsBusy
-        withResource c (go p)
+pubSub :: (ByteString -> ByteString -> PubSub IO ()) -> PubSub IO () -> Client ()
+pubSub f a = withConnection (loop a)
+  where
+    loop :: PubSub IO () -> Connection -> IO ()
+    loop p h = do
+        commands h p
+        r <- responses h
+        case r of
+            Nothing -> return ()
+            Just  k -> loop k h
+
+    commands :: Connection -> PubSub IO () -> IO ()
+    commands h c = do
+        r <- viewT c
+        case r of
+            Return              x -> return x
+            Subscribe    x :>>= k -> C.send h [x] >>= commands h . k
+            Unsubscribe  x :>>= k -> C.send h [x] >>= commands h . k
+            PSubscribe   x :>>= k -> C.send h [x] >>= commands h . k
+            PUnsubscribe x :>>= k -> C.send h [x] >>= commands h . k
+
+    responses :: Connection -> IO (Maybe (PubSub IO ()))
+    responses h = do
+        m <- (readPushMessage =<<) <$> C.receive h
+        case m of
+            Right (Message ch ms)          -> return (Just $ f ch ms)
+            Right (UnsubscribeMessage _ 0) -> return Nothing
+            Right _                        -> responses h
+            Left  e                        -> throwIO e
 
 run :: Connection -> Redis Lazy IO a -> IO a
 run h c = do
@@ -260,6 +275,28 @@ run h c = do
         PfCount x :>>= k -> getResult h x (readInt "PFCOUNT")       >>= run h . k
         PfMerge x :>>= k -> getResult h x (matchStr "PFMERGE" "OK") >>= run h . k
 
+        -- Pub/Sub
+        Publish x :>>= k -> getNow h x (readInt "PUBLISH") >>= run h . k
+
+withConnection :: (Connection -> IO a) -> Client a
+withConnection f = do
+    p <- ask
+    let c = connPool p
+        s = settings p
+    liftIO $ case sMaxWaitQueue s of
+        Nothing -> withResource c $ \h -> f h `finally` C.sync h
+        Just  q -> tryWithResource c (go p) >>= maybe (retry q c p) return
+  where
+    go p h = do
+        atomicModifyIORef' (failures p) $ \n -> (if n > 0 then n - 1 else 0, ())
+        f h `finally` C.sync h
+
+    retry q c p = do
+        k <- atomicModifyIORef' (failures p) $ \n -> (n + 1, n)
+        unless (k < q) $
+            throwIO ConnectionsBusy
+        withResource c (go p)
+
 getResult :: Connection -> Resp -> (Resp -> Result a) -> IO (Lazy (Result a))
 getResult h x g = do
     r <- newIORef (Left $ RedisError "missing response")
@@ -284,6 +321,6 @@ withTimeout 0 c = c { C.settings = setSendRecvTimeout 0                     (C.s
 withTimeout t c = c { C.settings = setSendRecvTimeout (10 + fromIntegral t) (C.settings c) }
 {-# INLINE withTimeout #-}
 
-ensure :: Lazy (Result a) -> Redis Lazy IO a
+ensure :: MonadIO m => Lazy (Result a) -> m a
 ensure r = force r >>= either throw return
 {-# INLINE ensure #-}

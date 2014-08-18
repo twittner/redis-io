@@ -12,6 +12,8 @@ module Network.Redis.IO.Connection
     , close
     , request
     , sync
+    , send
+    , receive
     ) where
 
 import Control.Applicative
@@ -30,7 +32,7 @@ import Network
 import Network.Redis.IO.Settings
 import Network.Redis.IO.Types
 import Network.Redis.IO.Timeouts (TimeoutManager, withTimeout)
-import Network.Socket hiding (connect, close, recv)
+import Network.Socket hiding (connect, close, send, recv)
 import Network.Socket.ByteString (recv, sendMany)
 import System.Logger hiding (Settings, settings, close)
 import System.Timeout
@@ -81,8 +83,7 @@ sync c = do
             t -> withTimeout (timeouts c) t abort (go a)
   where
     go a = do
-        sendMany (sock c) $
-            concatMap (toChunks . encode) (toList $ fmap fst a)
+        send c (toList $ fmap fst a)
         bb <- readIORef (leftover c)
         foldlM fetchResult bb (fmap snd a) >>= writeIORef (leftover c)
 
@@ -93,11 +94,27 @@ sync c = do
 
     fetchResult :: ByteString -> IORef (Result Resp) -> IO ByteString
     fetchResult b r = do
-        res <- parseWith (recv (sock c) 4096) resp b
-        case res of
-            Fail    _ _ m -> throwIO $ InternalError m
-            Partial _     -> throwIO $ InternalError "partial result"
-            Done    b'  x -> writeIORef r (fromResp x) >> return b'
+        (b', x) <- receiveWith c b
+        writeIORef r x
+        return b'
+
+send :: Connection -> [Resp] -> IO ()
+send c = sendMany (sock c) . concatMap (toChunks . encode)
+
+receive :: Connection -> IO (Result Resp)
+receive c = do
+    bstr   <- readIORef (leftover c)
+    (b, x) <- receiveWith c bstr
+    writeIORef (leftover c) b
+    return x
+
+receiveWith :: Connection -> ByteString -> IO (ByteString, Result Resp)
+receiveWith c b = do
+    res <- parseWith (recv (sock c) 4096) resp b
+    case res of
+        Fail    _ _ m -> throwIO $ InternalError m
+        Partial _     -> throwIO $ InternalError "partial result"
+        Done    b'  x -> return (b', fromResp x)
 
 fromResp :: Resp -> (Result Resp)
 fromResp (Err e) = Left $ RedisError e

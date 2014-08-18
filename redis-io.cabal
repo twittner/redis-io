@@ -60,7 +60,8 @@ test-suite redis-io-tests
     hs-source-dirs:    test
     ghc-options:       -Wall -O2 -fwarn-tabs
     build-depends:
-        base
+        async        == 2.0.*
+      , base
       , bytestring
       , containers
       , redis-io

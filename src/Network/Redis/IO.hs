@@ -22,6 +22,7 @@ module Network.Redis.IO
     , runClient
     , runRedis
     , request
+    , pubSub
 
     , Lazy
     , lazy

@@ -9,6 +9,8 @@ module CommandTests (tests) where
 import Control.Monad (void)
 import Control.Monad.IO.Class
 import Data.ByteString (ByteString)
+import Control.Concurrent (threadDelay)
+import Control.Concurrent.Async
 import Data.Monoid
 import Test.Tasty
 import Test.Tasty.HUnit
@@ -28,12 +30,12 @@ tests p = testGroup "commands"
         , testCase "dbsize"       $ dbsize       $$ (>= 0)
         , testCase "lastsave"     $ lastsave     $$ (>  1408021976)
         ]
-     , testGroup "connection"
+    , testGroup "connection"
         [ testCase "ping"   $ ping         $$ (== ())
         , testCase "echo"   $ echo "True"  $$ (== True)
         , testCase "select" $ select 0     $$ (== ())
         ]
-     , testGroup "keys"
+    , testGroup "keys"
         [ testCase "randomkey1" $
             randomkey $$ (== Nothing)
         , testCase "randomkey2" $
@@ -64,7 +66,7 @@ tests p = testGroup "commands"
             withFoo (scan zero (match "foo" <> count 10))
                     (\(c, k) -> c == zero && k == ["foo" :: ByteString])
         ]
-     , testGroup "strings"
+    , testGroup "strings"
         [ testCase "append" $
             with [("foo", "xx")] (append "foo" "y")(== 3)
         , testCase "get" $
@@ -83,7 +85,7 @@ tests p = testGroup "commands"
         , testCase "setrange" $ setrange "aa" 1 "cc" $$ (== 3)
         , testCase "strlen" $ strlen "aa" $$ (== 3)
         ]
-     , testGroup "bits"
+    , testGroup "bits"
         [ testCase "bitand" $ do
             with [("n1", "0"), ("n2", "1")] (bitand "r" ("n1" :| ["n2"])) (== 1)
             get "r" $$ (== Just (0 :: Int))
@@ -101,14 +103,14 @@ tests p = testGroup "commands"
         , testCase "setbit" $ with [("n1", "1")] (setbit "n1" 0 True) (== 0)
         , testCase "bitpos" $ with [("n1", "123")] (bitpos "n1" True (start 0) (end 10)) (== 2)
         ]
-     , testGroup "numeric"
+    , testGroup "numeric"
         [ testCase "decr" $ with [("x", "100")] (decr "x") (== 99)
         , testCase "decrby" $ with [("x", "100")] (decrby "x" 50) (== 50)
         , testCase "incr" $ with [("x", "99")] (incr "x") (== 100)
         , testCase "incrby" $ with [("x", "30")] (incrby "x" 20) (== 50)
         , testCase "incrbyfloat" $ with [("x", "2")] (incrbyfloat "x" 0.5) (== 2.5)
         ]
-     , testGroup "hashes"
+    , testGroup "hashes"
         [ testCase "hset" $ hset "h" "k" "42" $$ (== True)
         , testCase "hget" $
             bracket (hset "h" "k" "4") (del (one "h")) (hget "h" "k") (== Just (4 :: Int))
@@ -142,7 +144,7 @@ tests p = testGroup "commands"
                     (hvals "h")
                     (== ([4, 5] :: [Int]))
         ]
-     , testGroup "lists"
+    , testGroup "lists"
         [ testCase "lpush" $ lpush "l" ("0" :| ["1", "2", "3"]) $$ (== 4)
         , testCase "lpop" $
             bracket (lpush "l" ("1" :| ["2", "3"])) (del (one "l")) (lpop "l") (== Just (3 :: Int))
@@ -193,7 +195,7 @@ tests p = testGroup "commands"
                     (ltrim "l" 0 1 >> lrange "l" 0 3)
                     (== ([1, 2] :: [Int]))
         ]
-     , testGroup "sets"
+    , testGroup "sets"
         [ testCase "sadd" $ sadd "a" (one "0") $$ (== 1)
         , testCase "scard" $
             bracket (sadd "s" ("1" :| ["2", "1"])) (del (one "s"))
@@ -244,7 +246,7 @@ tests p = testGroup "commands"
                     (sunionstore "z" ("x" :| ["y"]) >> smembers "z")
                     ((== Set.fromList ([1, 2] :: [Int])) . Set.fromList)
         ]
-     , testGroup "sorted sets"
+    , testGroup "sorted sets"
         [ testCase "zadd" $ zadd "w" (one (1.0, "0")) $$ (== 1)
         , testCase "zcard" $
             bracket (zadd "v" ((1, "1") :| [(2, "2"), (3, "1")])) (del (one "v"))
@@ -307,13 +309,13 @@ tests p = testGroup "commands"
                     (zscore "v" "b")
                     (== Just (10 :: Double))
         ]
-     , testGroup "sort"
+    , testGroup "sort"
         [ testCase "sort" $
             bracket (lpush "l" ("5" :| ["2", "3", "1", "7"])) (del (one "l"))
                     (sort "l" (limit 0 10 <> asc))
                     (== ([1, 2, 3, 5, 7] :: [Int]))
         ]
-     , testGroup "hyperloglog"
+    , testGroup "hyperloglog"
         [ testCase "pfcount" $
             bracket (pfadd "p" ("5" :| ["2", "3", "1", "7"])) (del (one "p"))
                     (pfcount (one "p"))
@@ -323,6 +325,8 @@ tests p = testGroup "commands"
                     (pfmerge "t" ("p" :| ["q"]) >> pfcount (one "t"))
                     (== 2)
         ]
+    , testGroup "pub/sub"
+        [ testCase "pub/sub" (pubSubTest p) ]
     ]
   where
     ($$) :: (Eq a, Show a) => Redis Lazy IO (Lazy (Result a)) -> (a -> Bool) -> Assertion
@@ -347,3 +351,25 @@ tests p = testGroup "commands"
 
     withFoo :: Show a => Redis Lazy IO (Lazy (Result a)) -> (a -> Bool) -> Assertion
     withFoo = with [("foo", "42")]
+
+pubSubTest :: Pool -> IO ()
+pubSubTest p = do
+    a <- async $ runRedis p $ do
+        liftIO $ threadDelay 1000000
+        void $ publish "a" "hello"
+        void $ publish "b" "world"
+        void $ publish "z.1" "foo"
+        void $ publish "a" "add"
+        void $ publish "a" "quit"
+    runClient p $ pubSub k $ do
+        subscribe  (one "a")
+        subscribe  (one "b")
+        psubscribe (one "z.*")
+    wait a
+  where
+    k ch ms = do
+        liftIO $ print $ "message: " <> ch <> ": " <> ms
+        case ms of
+            "quit" -> unsubscribe [] >> punsubscribe []
+            "add"  -> subscribe (one "x")
+            _      -> return ()
