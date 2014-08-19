@@ -20,12 +20,12 @@ import Data.Redis
 import Data.Word
 import Data.Pool hiding (Pool)
 import Network.Redis.IO.Connection (Connection)
-import Network.Redis.IO.Lazy
 import Network.Redis.IO.Settings
 import Network.Redis.IO.Timeouts (TimeoutManager)
 import Network.Redis.IO.Types (ConnectionError (..))
 import Prelude hiding (readList)
 import System.Logger.Class hiding (Settings, settings)
+import System.IO.Unsafe (unsafeInterleaveIO)
 
 import qualified Data.Pool                   as P
 import qualified Network.Redis.IO.Connection as C
@@ -83,10 +83,10 @@ shutdown p = liftIO $ P.destroyAllResources (connPool p)
 runClient :: MonadIO m => Pool -> Client a -> m a
 runClient p a = liftIO $ runReaderT (client a) p
 
-runRedis :: MonadIO m => Pool -> Redis Lazy IO a -> m a
+runRedis :: MonadIO m => Pool -> Redis IO a -> m a
 runRedis p = runClient p . request
 
-request :: Redis Lazy IO a -> Client a
+request :: Redis IO a -> Client a
 request a = withConnection (flip run a)
 
 pubSub :: (ByteString -> ByteString -> PubSub IO ()) -> PubSub IO () -> Client ()
@@ -119,7 +119,7 @@ pubSub f a = withConnection (loop a)
             Right _                        -> responses h
             Left  e                        -> throwIO e
 
-run :: Connection -> Redis Lazy IO a -> IO a
+run :: Connection -> Redis IO a -> IO a
 run h c = do
     r <- viewT c
     case r of
@@ -297,23 +297,22 @@ withConnection f = do
             throwIO ConnectionsBusy
         withResource c (go p)
 
-getResult :: Connection -> Resp -> (Resp -> Result a) -> IO (Lazy a)
+getResult :: Connection -> Resp -> (Resp -> Result a) -> IO a
 getResult h x g = do
     r <- newIORef (throw $ RedisError "missing response")
-    f <- lazy $ do
+    C.request x r h
+    unsafeInterleaveIO $ do
         C.sync h
         either throwIO return =<< g <$> readIORef r
-    C.request x r h
-    return f
 {-# INLINE getResult #-}
 
 -- Like 'getResult' but triggers immediate execution.
-getNow :: Connection -> Resp -> (Resp -> Result a) -> IO (Lazy a)
+getNow :: Connection -> Resp -> (Resp -> Result a) -> IO a
 getNow h x g = do
     r <- newIORef (throw $ RedisError "missing response")
     C.request x r h
     C.sync h
-    lazy $ either throwIO return =<< g <$> readIORef r
+    either throwIO return =<< g <$> readIORef r
 {-# INLINE getNow #-}
 
 -- Update a 'Connection's send/recv timeout. Values > 0 get an additional

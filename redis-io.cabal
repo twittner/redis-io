@@ -32,7 +32,6 @@ library
     other-modules:
         Network.Redis.IO.Client
         Network.Redis.IO.Connection
-        Network.Redis.IO.Lazy
         Network.Redis.IO.Settings
         Network.Redis.IO.Timeouts
         Network.Redis.IO.Types

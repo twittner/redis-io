@@ -329,27 +329,27 @@ tests p = testGroup "commands"
         [ testCase "pub/sub" (pubSubTest p) ]
     ]
   where
-    ($$) :: (Eq a, Show a) => Redis Lazy IO (Lazy (Result a)) -> (a -> Bool) -> Assertion
+    ($$) :: (Eq a, Show a) => Redis IO a -> (a -> Bool) -> Assertion
     r $$ f = do
-        x <- runRedis p (ensure =<< r)
+        x <- runRedis p r
         assertBool (show x) (f x)
 
     bracket :: Show c
-            => Redis Lazy IO (Lazy (Result a))
-            -> Redis Lazy IO (Lazy (Result b))
-            -> Redis Lazy IO (Lazy (Result c))
+            => Redis IO a
+            -> Redis IO b
+            -> Redis IO c
             -> (c -> Bool)
             -> Assertion
     bracket a r f t = runRedis p $ do
         void $ a
-        x <- ensure =<< f
+        x <- f
         void $ r
         liftIO $ assertBool (show x) (t x)
 
-    with :: Show a => [(Key, ByteString)] -> Redis Lazy IO (Lazy (Result a)) -> (a -> Bool) -> Assertion
+    with :: Show a => [(Key, ByteString)] -> Redis IO a -> (a -> Bool) -> Assertion
     with kv r f = bracket (mset (head kv :| tail kv)) (del (fst (head kv) :| map fst (tail kv))) r f
 
-    withFoo :: Show a => Redis Lazy IO (Lazy (Result a)) -> (a -> Bool) -> Assertion
+    withFoo :: Show a => Redis IO a -> (a -> Bool) -> Assertion
     withFoo = with [("foo", "42")]
 
 pubSubTest :: Pool -> IO ()
