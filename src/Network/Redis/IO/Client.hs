@@ -112,7 +112,7 @@ pubSub f a = withConnection (loop a)
 
     responses :: Connection -> IO (Maybe (PubSub IO ()))
     responses h = do
-        m <- (readPushMessage =<<) <$> C.receive h
+        m <- readPushMessage <$> C.receive h
         case m of
             Right (Message ch ms)          -> return (Just $ f ch ms)
             Right (UnsubscribeMessage _ 0) -> return Nothing
@@ -297,21 +297,23 @@ withConnection f = do
             throwIO ConnectionsBusy
         withResource c (go p)
 
-getResult :: Connection -> Resp -> (Resp -> Result a) -> IO (Lazy (Result a))
+getResult :: Connection -> Resp -> (Resp -> Result a) -> IO (Lazy a)
 getResult h x g = do
-    r <- newIORef (Left $ RedisError "missing response")
-    f <- lazy $ C.sync h >> either Left g <$> readIORef r
+    r <- newIORef (throw $ RedisError "missing response")
+    f <- lazy $ do
+        C.sync h
+        either throwIO return =<< g <$> readIORef r
     C.request x r h
     return f
 {-# INLINE getResult #-}
 
 -- Like 'getResult' but triggers immediate execution.
-getNow :: Connection -> Resp -> (Resp -> Result a) -> IO (Lazy (Result a))
+getNow :: Connection -> Resp -> (Resp -> Result a) -> IO (Lazy a)
 getNow h x g = do
-    r <- newIORef (Left $ RedisError "missing response")
+    r <- newIORef (throw $ RedisError "missing response")
     C.request x r h
     C.sync h
-    lazy $ either Left g <$> readIORef r
+    lazy $ either throwIO return =<< g <$> readIORef r
 {-# INLINE getNow #-}
 
 -- Update a 'Connection's send/recv timeout. Values > 0 get an additional
@@ -320,7 +322,3 @@ withTimeout :: Int64 -> Connection -> Connection
 withTimeout 0 c = c { C.settings = setSendRecvTimeout 0                     (C.settings c) }
 withTimeout t c = c { C.settings = setSendRecvTimeout (10 + fromIntegral t) (C.settings c) }
 {-# INLINE withTimeout #-}
-
-ensure :: MonadIO m => Lazy (Result a) -> m a
-ensure r = force r >>= either throw return
-{-# INLINE ensure #-}

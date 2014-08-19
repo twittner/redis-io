@@ -3,6 +3,7 @@
 -- file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TupleSections     #-}
 
 module Network.Redis.IO.Connection
     ( Connection
@@ -46,7 +47,7 @@ data Connection = Connection
     , timeouts :: !TimeoutManager
     , sock     :: !Socket
     , leftover :: IORef ByteString
-    , buffer   :: IORef (Seq (Resp, IORef (Result Resp)))
+    , buffer   :: IORef (Seq (Resp, IORef Resp))
     }
 
 instance Show Connection where
@@ -70,7 +71,7 @@ connect t g m a = bracketOnError mkSock S.close $ \s -> do
 close :: Connection -> IO ()
 close = S.close . sock
 
-request :: Resp -> IORef (Result Resp) -> Connection -> IO ()
+request :: Resp -> IORef Resp -> Connection -> IO ()
 request x y c = modifyIORef' (buffer c) (|> (x, y))
 
 sync :: Connection -> IO ()
@@ -92,7 +93,7 @@ sync c = do
         close c
         throwIO $ Timeout (show c)
 
-    fetchResult :: ByteString -> IORef (Result Resp) -> IO ByteString
+    fetchResult :: ByteString -> IORef Resp -> IO ByteString
     fetchResult b r = do
         (b', x) <- receiveWith c b
         writeIORef r x
@@ -101,21 +102,21 @@ sync c = do
 send :: Connection -> [Resp] -> IO ()
 send c = sendMany (sock c) . concatMap (toChunks . encode)
 
-receive :: Connection -> IO (Result Resp)
+receive :: Connection -> IO Resp
 receive c = do
     bstr   <- readIORef (leftover c)
     (b, x) <- receiveWith c bstr
     writeIORef (leftover c) b
     return x
 
-receiveWith :: Connection -> ByteString -> IO (ByteString, Result Resp)
+receiveWith :: Connection -> ByteString -> IO (ByteString, Resp)
 receiveWith c b = do
     res <- parseWith (recv (sock c) 4096) resp b
     case res of
         Fail    _ _ m -> throwIO $ InternalError m
         Partial _     -> throwIO $ InternalError "partial result"
-        Done    b'  x -> return (b', fromResp x)
+        Done    b'  x -> (b',) <$> errorCheck x
 
-fromResp :: Resp -> (Result Resp)
-fromResp (Err e) = Left $ RedisError e
-fromResp r       = Right r
+errorCheck :: Resp -> IO Resp
+errorCheck (Err e) = throwIO $ RedisError e
+errorCheck r       = return r

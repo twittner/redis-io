@@ -27,7 +27,6 @@ module Network.Redis.IO
     , Lazy
     , lazy
     , force
-    , ensure
 
     -- * Exceptions
     , ConnectionError (..)
