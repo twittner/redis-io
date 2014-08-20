@@ -19,9 +19,9 @@ module Network.Redis.IO
     , shutdown
 
     , Client
-    , runClient
     , runRedis
     , request
+    , pipeline
     , pubSub
 
     -- * Exceptions
