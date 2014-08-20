@@ -46,7 +46,7 @@ main = do
 
 runPing :: Int -> Pool -> IO ()
 runPing n p = do
-    x <- runRedis p $ Prelude.last <$> replicateM n ping
+    x <- runRedis p $ pipelined $ Prelude.last <$> replicateM n ping
     x `seq` return ()
 
 runPingH :: Int -> Hedis.Connection -> IO ()
@@ -56,7 +56,7 @@ runPingH n p = do
 
 runSetGet :: Int -> Pool -> IO ()
 runSetGet n p = do
-    x <- runRedis p $ do
+    x <- runRedis p $ pipelined $ do
         replicateM_ n $ set "hello" "world" mempty
         get "hello" :: Redis IO (Maybe ByteString)
     x `seq` return ()

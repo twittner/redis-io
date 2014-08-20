@@ -331,7 +331,7 @@ tests p = testGroup "commands"
   where
     ($$) :: (Eq a, Show a) => Redis IO a -> (a -> Bool) -> Assertion
     r $$ f = do
-        x <- runRedis p r
+        x <- runRedis p $ pipelined r
         assertBool (show x) (f x)
 
     bracket :: Show c
@@ -340,7 +340,7 @@ tests p = testGroup "commands"
             -> Redis IO c
             -> (c -> Bool)
             -> Assertion
-    bracket a r f t = runRedis p $ do
+    bracket a r f t = runRedis p $ pipelined $ do
         void $ a
         x <- f
         void $ r
@@ -354,14 +354,14 @@ tests p = testGroup "commands"
 
 pubSubTest :: Pool -> IO ()
 pubSubTest p = do
-    a <- async $ runRedis p $ do
+    a <- async $ runRedis p $ pipelined $ do
         liftIO $ threadDelay 1000000
         void $ publish "a" "hello"
         void $ publish "b" "world"
         void $ publish "z.1" "foo"
         void $ publish "a" "add"
         void $ publish "a" "quit"
-    runClient p $ pubSub k $ do
+    runRedis p $ pubSub k $ do
         subscribe  (one "a")
         subscribe  (one "b")
         psubscribe (one "z.*")

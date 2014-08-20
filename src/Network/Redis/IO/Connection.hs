@@ -20,7 +20,6 @@ module Network.Redis.IO.Connection
 import Control.Applicative
 import Control.Exception
 import Control.Monad
-import Data.Attoparsec.ByteString hiding (Result)
 import Data.ByteString (ByteString)
 import Data.ByteString.Lazy (toChunks)
 import Data.Foldable hiding (concatMap)
@@ -35,18 +34,22 @@ import Network.Redis.IO.Types
 import Network.Redis.IO.Timeouts (TimeoutManager, withTimeout)
 import Network.Socket hiding (connect, close, send, recv)
 import Network.Socket.ByteString (recv, sendMany)
+import Pipes
+import Pipes.Attoparsec
+import Pipes.Parse
 import System.Logger hiding (Settings, settings, close)
 import System.Timeout
 
-import qualified Data.Sequence  as Seq
-import qualified Network.Socket as S
+import qualified Data.ByteString as B
+import qualified Data.Sequence   as Seq
+import qualified Network.Socket  as S
 
 data Connection = Connection
     { settings :: !Settings
     , logger   :: !Logger
     , timeouts :: !TimeoutManager
     , sock     :: !Socket
-    , leftover :: IORef ByteString
+    , producer :: IORef (Producer ByteString IO ())
     , buffer   :: IORef (Seq (Resp, IORef Resp))
     }
 
@@ -64,9 +67,17 @@ connect t g m a = bracketOnError mkSock S.close $ \s -> do
     ok <- timeout (ms (sConnectTimeout t) * 1000) (S.connect s (addrAddress a))
     unless (isJust ok) $
         throwIO ConnectTimeout
-    Connection t g m s <$> newIORef "" <*> newIORef Seq.empty
+    Connection t g m s <$> newIORef (fromSock s) <*> newIORef Seq.empty
   where
     mkSock = socket (addrFamily a) (addrSocketType a) (addrProtocol a)
+
+    fromSock :: Socket -> Producer ByteString IO ()
+    fromSock s = do
+        x <- lift $ recv s 4096
+        when (B.null x) $
+            lift $ throwIO ConnectionClosed
+        yield x
+        fromSock s
 
 close :: Connection -> IO ()
 close = S.close . sock
@@ -85,37 +96,37 @@ sync c = do
   where
     go a = do
         send c (toList $ fmap fst a)
-        bb <- readIORef (leftover c)
-        foldlM fetchResult bb (fmap snd a) >>= writeIORef (leftover c)
+        prod <- readIORef (producer c)
+        foldlM fetchResult prod (fmap snd a) >>= writeIORef (producer c)
 
     abort = do
         err (logger c) $ "connection.timeout" .= show c
         close c
         throwIO $ Timeout (show c)
 
-    fetchResult :: ByteString -> IORef Resp -> IO ByteString
-    fetchResult b r = do
-        (b', x) <- receiveWith c b
+    fetchResult :: Producer ByteString IO () -> IORef Resp -> IO (Producer ByteString IO ())
+    fetchResult p r = do
+        (p', x) <- receiveWith p
         writeIORef r x
-        return b'
+        return p'
 
 send :: Connection -> [Resp] -> IO ()
 send c = sendMany (sock c) . concatMap (toChunks . encode)
 
 receive :: Connection -> IO Resp
 receive c = do
-    bstr   <- readIORef (leftover c)
-    (b, x) <- receiveWith c bstr
-    writeIORef (leftover c) b
+    prod   <- readIORef (producer c)
+    (p, x) <- receiveWith prod
+    writeIORef (producer c) p
     return x
 
-receiveWith :: Connection -> ByteString -> IO (ByteString, Resp)
-receiveWith c b = do
-    res <- parseWith (recv (sock c) 4096) resp b
-    case res of
-        Fail    _ _ m -> throwIO $ InternalError m
-        Partial _     -> throwIO $ InternalError "partial result"
-        Done    b'  x -> (b',) <$> errorCheck x
+receiveWith :: Producer ByteString IO () -> IO (Producer ByteString IO (), Resp)
+receiveWith p = do
+    (x, p') <- runStateT (parse resp) p
+    case x of
+        Nothing        -> throwIO ConnectionClosed
+        Just (Left e)  -> throwIO $ InternalError (peMessage e)
+        Just (Right y) -> (p',) <$> errorCheck y
 
 errorCheck :: Resp -> IO Resp
 errorCheck (Err e) = throwIO $ RedisError e

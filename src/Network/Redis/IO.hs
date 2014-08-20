@@ -20,8 +20,8 @@ module Network.Redis.IO
 
     , Client
     , runRedis
-    , request
-    , pipeline
+    , stepwise
+    , pipelined
     , pubSub
 
     -- * Exceptions

@@ -84,21 +84,21 @@ shutdown p = liftIO $ P.destroyAllResources (connPool p)
 runRedis :: MonadIO m => Pool -> Client a -> m a
 runRedis p a = liftIO $ runReaderT (client a) p
 
-request :: Redis IO a -> Client a
-request a = withConnection (flip (eval getDirect) a)
+stepwise :: Redis IO a -> Client a
+stepwise a = withConnection (flip (eval getEager) a)
 
-pipeline :: Redis IO a -> Client a
-pipeline a = withConnection (flip (eval getResult) a)
+pipelined :: Redis IO a -> Client a
+pipelined a = withConnection (flip (eval getLazy) a)
 
 pubSub :: (ByteString -> ByteString -> PubSub IO ()) -> PubSub IO () -> Client ()
 pubSub f a = withConnection (loop a)
   where
-    loop :: PubSub IO () -> Connection -> IO ()
+    loop :: PubSub IO () -> Connection -> IO ((), [IO ()])
     loop p h = do
         commands h p
         r <- responses h
         case r of
-            Nothing -> return ()
+            Nothing -> return ((), [])
             Just  k -> loop k h
 
     commands :: Connection -> PubSub IO () -> IO ()
@@ -120,180 +120,183 @@ pubSub f a = withConnection (loop a)
             Right _                        -> responses h
             Left  e                        -> throwIO e
 
-eval :: (forall a. Connection -> Resp -> (Resp -> Result a) -> IO a) -> Connection -> Redis IO b -> IO b
-eval f conn red = run conn red
+eval :: (forall a. Connection -> Resp -> (Resp -> Result a) -> IO (a, IO ()))
+     -> Connection
+     -> Redis IO b
+     -> IO (b, [IO ()])
+eval f conn red = run conn [] red
   where
-    run :: Connection -> Redis IO a -> IO a
-    run h c = do
+    run :: Connection -> [IO ()] -> Redis IO a -> IO (a, [IO ()])
+    run h ii c = do
         r <- viewT c
         case r of
-            Return a -> return a
+            Return a -> return (a, ii)
 
             -- Connection
-            Ping   x :>>= k -> f h x (matchStr "PING" "PONG") >>= run h . k
-            Echo   x :>>= k -> f h x (readBulk "ECHO")        >>= run h . k
-            Auth   x :>>= k -> f h x (matchStr "AUTH" "OK")   >>= run h . k
-            Quit   x :>>= k -> f h x (matchStr "QUIT" "OK")   >>= run h . k
-            Select x :>>= k -> f h x (matchStr "SELECT" "OK") >>= run h . k
+            Ping   x :>>= k -> f h x (matchStr "PING" "PONG") >>= \(a, i) -> run h (i:ii) $ k a
+            Echo   x :>>= k -> f h x (readBulk "ECHO")        >>= \(a, i) -> run h (i:ii) $ k a
+            Auth   x :>>= k -> f h x (matchStr "AUTH" "OK")   >>= \(a, i) -> run h (i:ii) $ k a
+            Quit   x :>>= k -> f h x (matchStr "QUIT" "OK")   >>= \(a, i) -> run h (i:ii) $ k a
+            Select x :>>= k -> f h x (matchStr "SELECT" "OK") >>= \(a, i) -> run h (i:ii) $ k a
 
             -- Server
-            BgRewriteAOF x :>>= k -> f h x (anyStr "BGREWRITEAOF")    >>= run h . k
-            BgSave       x :>>= k -> f h x (anyStr "BGSAVE")          >>= run h . k
-            Save         x :>>= k -> f h x (matchStr "SAVE" "OK")     >>= run h . k
-            FlushAll     x :>>= k -> f h x (matchStr "FLUSHALL" "OK") >>= run h . k
-            FlushDb      x :>>= k -> f h x (matchStr "FLUSHDB" "OK")  >>= run h . k
-            DbSize       x :>>= k -> f h x (readInt "DBSIZE")         >>= run h . k
-            LastSave     x :>>= k -> f h x (readInt "LASTSAVE")       >>= run h . k
+            BgRewriteAOF x :>>= k -> f h x (anyStr "BGREWRITEAOF")    >>= \(a, i) -> run h (i:ii) $ k a
+            BgSave       x :>>= k -> f h x (anyStr "BGSAVE")          >>= \(a, i) -> run h (i:ii) $ k a
+            Save         x :>>= k -> f h x (matchStr "SAVE" "OK")     >>= \(a, i) -> run h (i:ii) $ k a
+            FlushAll     x :>>= k -> f h x (matchStr "FLUSHALL" "OK") >>= \(a, i) -> run h (i:ii) $ k a
+            FlushDb      x :>>= k -> f h x (matchStr "FLUSHDB" "OK")  >>= \(a, i) -> run h (i:ii) $ k a
+            DbSize       x :>>= k -> f h x (readInt "DBSIZE")         >>= \(a, i) -> run h (i:ii) $ k a
+            LastSave     x :>>= k -> f h x (readInt "LASTSAVE")       >>= \(a, i) -> run h (i:ii) $ k a
 
             -- Transactions
-            Multi   x :>>= k -> f h x (matchStr "MULTI" "OK")   >>= run h . k
-            Watch   x :>>= k -> f h x (matchStr "WATCH" "OK")   >>= run h . k
-            Unwatch x :>>= k -> f h x (matchStr "UNWATCH" "OK") >>= run h . k
-            Discard x :>>= k -> f h x (matchStr "DISCARD" "OK") >>= run h . k
-            Exec    x :>>= k -> f h x (readList "EXEC")         >>= run h . k
-            ExecRaw x :>>= k -> f h x return                    >>= run h . k
+            Multi   x :>>= k -> f h x (matchStr "MULTI" "OK")   >>= \(a, i) -> run h (i:ii) $ k a
+            Watch   x :>>= k -> f h x (matchStr "WATCH" "OK")   >>= \(a, i) -> run h (i:ii) $ k a
+            Unwatch x :>>= k -> f h x (matchStr "UNWATCH" "OK") >>= \(a, i) -> run h (i:ii) $ k a
+            Discard x :>>= k -> f h x (matchStr "DISCARD" "OK") >>= \(a, i) -> run h (i:ii) $ k a
+            Exec    x :>>= k -> f h x (readList "EXEC")         >>= \(a, i) -> run h (i:ii) $ k a
+            ExecRaw x :>>= k -> f h x return                    >>= \(a, i) -> run h (i:ii) $ k a
 
             -- Keys
-            Del       x :>>= k -> f h x (readInt "DEL")             >>= run h . k
-            Dump      x :>>= k -> f h x (readBulk'Null "DUMP")      >>= run h . k
-            Exists    x :>>= k -> f h x (readBool "EXISTS")         >>= run h . k
-            Expire    x :>>= k -> f h x (readBool "EXPIRE")         >>= run h . k
-            ExpireAt  x :>>= k -> f h x (readBool "EXPIREAT")       >>= run h . k
-            Persist   x :>>= k -> f h x (readBool "PERSIST")        >>= run h . k
-            Keys      x :>>= k -> f h x (readList "KEYS")           >>= run h . k
-            RandomKey x :>>= k -> f h x (readBulk'Null "RANDOMKEY") >>= run h . k
-            Rename    x :>>= k -> f h x (matchStr "RENAME" "OK")    >>= run h . k
-            RenameNx  x :>>= k -> f h x (readBool "RENAMENX")       >>= run h . k
-            Ttl       x :>>= k -> f h x (readTTL "TTL")             >>= run h . k
-            Type      x :>>= k -> f h x (readType "TYPE")           >>= run h . k
-            Scan      x :>>= k -> f h x (readScan "SCAN")           >>= run h . k
+            Del       x :>>= k -> f h x (readInt "DEL")             >>= \(a, i) -> run h (i:ii) $ k a
+            Dump      x :>>= k -> f h x (readBulk'Null "DUMP")      >>= \(a, i) -> run h (i:ii) $ k a
+            Exists    x :>>= k -> f h x (readBool "EXISTS")         >>= \(a, i) -> run h (i:ii) $ k a
+            Expire    x :>>= k -> f h x (readBool "EXPIRE")         >>= \(a, i) -> run h (i:ii) $ k a
+            ExpireAt  x :>>= k -> f h x (readBool "EXPIREAT")       >>= \(a, i) -> run h (i:ii) $ k a
+            Persist   x :>>= k -> f h x (readBool "PERSIST")        >>= \(a, i) -> run h (i:ii) $ k a
+            Keys      x :>>= k -> f h x (readList "KEYS")           >>= \(a, i) -> run h (i:ii) $ k a
+            RandomKey x :>>= k -> f h x (readBulk'Null "RANDOMKEY") >>= \(a, i) -> run h (i:ii) $ k a
+            Rename    x :>>= k -> f h x (matchStr "RENAME" "OK")    >>= \(a, i) -> run h (i:ii) $ k a
+            RenameNx  x :>>= k -> f h x (readBool "RENAMENX")       >>= \(a, i) -> run h (i:ii) $ k a
+            Ttl       x :>>= k -> f h x (readTTL "TTL")             >>= \(a, i) -> run h (i:ii) $ k a
+            Type      x :>>= k -> f h x (readType "TYPE")           >>= \(a, i) -> run h (i:ii) $ k a
+            Scan      x :>>= k -> f h x (readScan "SCAN")           >>= \(a, i) -> run h (i:ii) $ k a
 
             -- Strings
-            Append   x :>>= k -> f h x (readInt "APPEND")          >>= run h . k
-            Get      x :>>= k -> f h x (readBulk'Null "GET")       >>= run h . k
-            GetRange x :>>= k -> f h x (readBulk "GETRANGE")       >>= run h . k
-            GetSet   x :>>= k -> f h x (readBulk'Null "GETSET")    >>= run h . k
-            MGet     x :>>= k -> f h x (readListOfMaybes "MGET")   >>= run h . k
-            MSet     x :>>= k -> f h x (matchStr "MSET" "OK")      >>= run h . k
-            MSetNx   x :>>= k -> f h x (readBool "MSETNX")         >>= run h . k
-            Set      x :>>= k -> f h x fromSet                     >>= run h . k
-            SetRange x :>>= k -> f h x (readInt "SETRANGE")        >>= run h . k
-            StrLen   x :>>= k -> f h x (readInt "STRLEN")          >>= run h . k
+            Append   x :>>= k -> f h x (readInt "APPEND")        >>= \(a, i) -> run h (i:ii) $ k a
+            Get      x :>>= k -> f h x (readBulk'Null "GET")     >>= \(a, i) -> run h (i:ii) $ k a
+            GetRange x :>>= k -> f h x (readBulk "GETRANGE")     >>= \(a, i) -> run h (i:ii) $ k a
+            GetSet   x :>>= k -> f h x (readBulk'Null "GETSET")  >>= \(a, i) -> run h (i:ii) $ k a
+            MGet     x :>>= k -> f h x (readListOfMaybes "MGET") >>= \(a, i) -> run h (i:ii) $ k a
+            MSet     x :>>= k -> f h x (matchStr "MSET" "OK")    >>= \(a, i) -> run h (i:ii) $ k a
+            MSetNx   x :>>= k -> f h x (readBool "MSETNX")       >>= \(a, i) -> run h (i:ii) $ k a
+            Set      x :>>= k -> f h x fromSet                   >>= \(a, i) -> run h (i:ii) $ k a
+            SetRange x :>>= k -> f h x (readInt "SETRANGE")      >>= \(a, i) -> run h (i:ii) $ k a
+            StrLen   x :>>= k -> f h x (readInt "STRLEN")        >>= \(a, i) -> run h (i:ii) $ k a
 
             -- Bits
-            BitAnd   x :>>= k -> f h x (readInt "BITOP")    >>= run h . k
-            BitCount x :>>= k -> f h x (readInt "BITCOUNT") >>= run h . k
-            BitNot   x :>>= k -> f h x (readInt "BITOP")    >>= run h . k
-            BitOr    x :>>= k -> f h x (readInt "BITOP")    >>= run h . k
-            BitPos   x :>>= k -> f h x (readInt "BITPOS")   >>= run h . k
-            BitXOr   x :>>= k -> f h x (readInt "BITOP")    >>= run h . k
-            GetBit   x :>>= k -> f h x (readInt "GETBIT")   >>= run h . k
-            SetBit   x :>>= k -> f h x (readInt "SETBIT")   >>= run h . k
+            BitAnd   x :>>= k -> f h x (readInt "BITOP")    >>= \(a, i) -> run h (i:ii) $ k a
+            BitCount x :>>= k -> f h x (readInt "BITCOUNT") >>= \(a, i) -> run h (i:ii) $ k a
+            BitNot   x :>>= k -> f h x (readInt "BITOP")    >>= \(a, i) -> run h (i:ii) $ k a
+            BitOr    x :>>= k -> f h x (readInt "BITOP")    >>= \(a, i) -> run h (i:ii) $ k a
+            BitPos   x :>>= k -> f h x (readInt "BITPOS")   >>= \(a, i) -> run h (i:ii) $ k a
+            BitXOr   x :>>= k -> f h x (readInt "BITOP")    >>= \(a, i) -> run h (i:ii) $ k a
+            GetBit   x :>>= k -> f h x (readInt "GETBIT")   >>= \(a, i) -> run h (i:ii) $ k a
+            SetBit   x :>>= k -> f h x (readInt "SETBIT")   >>= \(a, i) -> run h (i:ii) $ k a
 
             -- Numeric
-            Decr        x :>>= k -> f h x (readInt "DECR")         >>= run h . k
-            DecrBy      x :>>= k -> f h x (readInt "DECRBY")       >>= run h . k
-            Incr        x :>>= k -> f h x (readInt "INCR")         >>= run h . k
-            IncrBy      x :>>= k -> f h x (readInt "INCRBY")       >>= run h . k
-            IncrByFloat x :>>= k -> f h x (readBulk "INCRBYFLOAT") >>= run h . k
+            Decr        x :>>= k -> f h x (readInt "DECR")         >>= \(a, i) -> run h (i:ii) $ k a
+            DecrBy      x :>>= k -> f h x (readInt "DECRBY")       >>= \(a, i) -> run h (i:ii) $ k a
+            Incr        x :>>= k -> f h x (readInt "INCR")         >>= \(a, i) -> run h (i:ii) $ k a
+            IncrBy      x :>>= k -> f h x (readInt "INCRBY")       >>= \(a, i) -> run h (i:ii) $ k a
+            IncrByFloat x :>>= k -> f h x (readBulk "INCRBYFLOAT") >>= \(a, i) -> run h (i:ii) $ k a
 
             -- Hashes
-            HDel         x :>>= k -> f h x (readInt "HDEL")           >>= run h . k
-            HExists      x :>>= k -> f h x (readBool "HEXISTS")       >>= run h . k
-            HGet         x :>>= k -> f h x (readBulk'Null "HGET")     >>= run h . k
-            HGetAll      x :>>= k -> f h x (readFields "HGETALL")     >>= run h . k
-            HIncrBy      x :>>= k -> f h x (readInt "HINCRBY")        >>= run h . k
-            HIncrByFloat x :>>= k -> f h x (readBulk "HINCRBYFLOAT")  >>= run h . k
-            HKeys        x :>>= k -> f h x (readList "HKEYS")         >>= run h . k
-            HLen         x :>>= k -> f h x (readInt "HLEN")           >>= run h . k
-            HMGet        x :>>= k -> f h x (readListOfMaybes "HMGET") >>= run h . k
-            HMSet        x :>>= k -> f h x (matchStr "HMSET" "OK")    >>= run h . k
-            HSet         x :>>= k -> f h x (readBool "HSET")          >>= run h . k
-            HSetNx       x :>>= k -> f h x (readBool "HSETNX")        >>= run h . k
-            HVals        x :>>= k -> f h x (readList "HVALS")         >>= run h . k
-            HScan        x :>>= k -> f h x (readScan "HSCAN")         >>= run h . k
+            HDel         x :>>= k -> f h x (readInt "HDEL")           >>= \(a, i) -> run h (i:ii) $ k a
+            HExists      x :>>= k -> f h x (readBool "HEXISTS")       >>= \(a, i) -> run h (i:ii) $ k a
+            HGet         x :>>= k -> f h x (readBulk'Null "HGET")     >>= \(a, i) -> run h (i:ii) $ k a
+            HGetAll      x :>>= k -> f h x (readFields "HGETALL")     >>= \(a, i) -> run h (i:ii) $ k a
+            HIncrBy      x :>>= k -> f h x (readInt "HINCRBY")        >>= \(a, i) -> run h (i:ii) $ k a
+            HIncrByFloat x :>>= k -> f h x (readBulk "HINCRBYFLOAT")  >>= \(a, i) -> run h (i:ii) $ k a
+            HKeys        x :>>= k -> f h x (readList "HKEYS")         >>= \(a, i) -> run h (i:ii) $ k a
+            HLen         x :>>= k -> f h x (readInt "HLEN")           >>= \(a, i) -> run h (i:ii) $ k a
+            HMGet        x :>>= k -> f h x (readListOfMaybes "HMGET") >>= \(a, i) -> run h (i:ii) $ k a
+            HMSet        x :>>= k -> f h x (matchStr "HMSET" "OK")    >>= \(a, i) -> run h (i:ii) $ k a
+            HSet         x :>>= k -> f h x (readBool "HSET")          >>= \(a, i) -> run h (i:ii) $ k a
+            HSetNx       x :>>= k -> f h x (readBool "HSETNX")        >>= \(a, i) -> run h (i:ii) $ k a
+            HVals        x :>>= k -> f h x (readList "HVALS")         >>= \(a, i) -> run h (i:ii) $ k a
+            HScan        x :>>= k -> f h x (readScan "HSCAN")         >>= \(a, i) -> run h (i:ii) $ k a
 
             -- Lists
-            BLPop      t x :>>= k -> getNow (withTimeout t h) x (readKeyValue "BLPOP")       >>= run h . k
-            BRPop      t x :>>= k -> getNow (withTimeout t h) x (readKeyValue "BRPOP")       >>= run h . k
-            BRPopLPush t x :>>= k -> getNow (withTimeout t h) x (readBulk'Null "BRPOPLPUSH") >>= run h . k
-            LIndex       x :>>= k -> f h x (readBulk'Null "LINDEX")     >>= run h . k
-            LInsert      x :>>= k -> f h x (readInt "LINSERT")          >>= run h . k
-            LLen         x :>>= k -> f h x (readInt "LLEN")             >>= run h . k
-            LPop         x :>>= k -> f h x (readBulk'Null "LPOP")       >>= run h . k
-            LPush        x :>>= k -> f h x (readInt "LPUSH")            >>= run h . k
-            LPushX       x :>>= k -> f h x (readInt "LPUSHX")           >>= run h . k
-            LRange       x :>>= k -> f h x (readList "LRANGE")          >>= run h . k
-            LRem         x :>>= k -> f h x (readInt "LREM")             >>= run h . k
-            LSet         x :>>= k -> f h x (matchStr "LSET" "OK")       >>= run h . k
-            LTrim        x :>>= k -> f h x (matchStr "LTRIM" "OK")      >>= run h . k
-            RPop         x :>>= k -> f h x (readBulk'Null "RPOP")       >>= run h . k
-            RPopLPush    x :>>= k -> f h x (readBulk'Null "RPOPLPUSH")  >>= run h . k
-            RPush        x :>>= k -> f h x (readInt "RPUSH")            >>= run h . k
-            RPushX       x :>>= k -> f h x (readInt "RPUSHX")           >>= run h . k
+            BLPop      t x :>>= k -> getNow (withTimeout t h) x (readKeyValue "BLPOP")       >>= \(a, i) -> run h (i:ii) $ k a
+            BRPop      t x :>>= k -> getNow (withTimeout t h) x (readKeyValue "BRPOP")       >>= \(a, i) -> run h (i:ii) $ k a
+            BRPopLPush t x :>>= k -> getNow (withTimeout t h) x (readBulk'Null "BRPOPLPUSH") >>= \(a, i) -> run h (i:ii) $ k a
+            LIndex       x :>>= k -> f h x (readBulk'Null "LINDEX")    >>= \(a, i) -> run h (i:ii) $ k a
+            LInsert      x :>>= k -> f h x (readInt "LINSERT")         >>= \(a, i) -> run h (i:ii) $ k a
+            LLen         x :>>= k -> f h x (readInt "LLEN")            >>= \(a, i) -> run h (i:ii) $ k a
+            LPop         x :>>= k -> f h x (readBulk'Null "LPOP")      >>= \(a, i) -> run h (i:ii) $ k a
+            LPush        x :>>= k -> f h x (readInt "LPUSH")           >>= \(a, i) -> run h (i:ii) $ k a
+            LPushX       x :>>= k -> f h x (readInt "LPUSHX")          >>= \(a, i) -> run h (i:ii) $ k a
+            LRange       x :>>= k -> f h x (readList "LRANGE")         >>= \(a, i) -> run h (i:ii) $ k a
+            LRem         x :>>= k -> f h x (readInt "LREM")            >>= \(a, i) -> run h (i:ii) $ k a
+            LSet         x :>>= k -> f h x (matchStr "LSET" "OK")      >>= \(a, i) -> run h (i:ii) $ k a
+            LTrim        x :>>= k -> f h x (matchStr "LTRIM" "OK")     >>= \(a, i) -> run h (i:ii) $ k a
+            RPop         x :>>= k -> f h x (readBulk'Null "RPOP")      >>= \(a, i) -> run h (i:ii) $ k a
+            RPopLPush    x :>>= k -> f h x (readBulk'Null "RPOPLPUSH") >>= \(a, i) -> run h (i:ii) $ k a
+            RPush        x :>>= k -> f h x (readInt "RPUSH")           >>= \(a, i) -> run h (i:ii) $ k a
+            RPushX       x :>>= k -> f h x (readInt "RPUSHX")          >>= \(a, i) -> run h (i:ii) $ k a
 
             -- Sets
-            SAdd          x :>>= k -> f h x (readInt "SADD")                 >>= run h . k
-            SCard         x :>>= k -> f h x (readInt "SCARD")                >>= run h . k
-            SDiff         x :>>= k -> f h x (readList "SDIFF")               >>= run h . k
-            SDiffStore    x :>>= k -> f h x (readInt "SDIFFSTORE")           >>= run h . k
-            SInter        x :>>= k -> f h x (readList "SINTER")              >>= run h . k
-            SInterStore   x :>>= k -> f h x (readInt "SINTERSTORE")          >>= run h . k
-            SIsMember     x :>>= k -> f h x (readBool "SISMEMBER")           >>= run h . k
-            SMembers      x :>>= k -> f h x (readList "SMEMBERS")            >>= run h . k
-            SMove         x :>>= k -> f h x (readBool "SMOVE")               >>= run h . k
-            SPop          x :>>= k -> f h x (readBulk'Null "SPOP")           >>= run h . k
-            SRandMember a x :>>= k -> f h x (readBulk'Array "SRANDMEMBER" a) >>= run h . k
-            SRem          x :>>= k -> f h x (readInt "SREM")                 >>= run h . k
-            SScan         x :>>= k -> f h x (readScan "SSCAN")               >>= run h . k
-            SUnion        x :>>= k -> f h x (readList "SUNION")              >>= run h . k
-            SUnionStore   x :>>= k -> f h x (readInt "SUNIONSTORE")          >>= run h . k
+            SAdd          x :>>= k -> f h x (readInt "SADD")                 >>= \(a, i) -> run h (i:ii) $ k a
+            SCard         x :>>= k -> f h x (readInt "SCARD")                >>= \(a, i) -> run h (i:ii) $ k a
+            SDiff         x :>>= k -> f h x (readList "SDIFF")               >>= \(a, i) -> run h (i:ii) $ k a
+            SDiffStore    x :>>= k -> f h x (readInt "SDIFFSTORE")           >>= \(a, i) -> run h (i:ii) $ k a
+            SInter        x :>>= k -> f h x (readList "SINTER")              >>= \(a, i) -> run h (i:ii) $ k a
+            SInterStore   x :>>= k -> f h x (readInt "SINTERSTORE")          >>= \(a, i) -> run h (i:ii) $ k a
+            SIsMember     x :>>= k -> f h x (readBool "SISMEMBER")           >>= \(a, i) -> run h (i:ii) $ k a
+            SMembers      x :>>= k -> f h x (readList "SMEMBERS")            >>= \(a, i) -> run h (i:ii) $ k a
+            SMove         x :>>= k -> f h x (readBool "SMOVE")               >>= \(a, i) -> run h (i:ii) $ k a
+            SPop          x :>>= k -> f h x (readBulk'Null "SPOP")           >>= \(a, i) -> run h (i:ii) $ k a
+            SRandMember y x :>>= k -> f h x (readBulk'Array "SRANDMEMBER" y) >>= \(a, i) -> run h (i:ii) $ k a
+            SRem          x :>>= k -> f h x (readInt "SREM")                 >>= \(a, i) -> run h (i:ii) $ k a
+            SScan         x :>>= k -> f h x (readScan "SSCAN")               >>= \(a, i) -> run h (i:ii) $ k a
+            SUnion        x :>>= k -> f h x (readList "SUNION")              >>= \(a, i) -> run h (i:ii) $ k a
+            SUnionStore   x :>>= k -> f h x (readInt "SUNIONSTORE")          >>= \(a, i) -> run h (i:ii) $ k a
 
             -- Sorted Sets
-            ZAdd               x :>>= k -> f h x (readInt "ZADD")                     >>= run h . k
-            ZCard              x :>>= k -> f h x (readInt "ZCARD")                    >>= run h . k
-            ZCount             x :>>= k -> f h x (readInt "ZCOUNT")                   >>= run h . k
-            ZIncrBy            x :>>= k -> f h x (readBulk "ZINCRBY")                 >>= run h . k
-            ZInterStore        x :>>= k -> f h x (readInt "ZINTERSTORE")              >>= run h . k
-            ZLexCount          x :>>= k -> f h x (readInt "ZLEXCOUNT")                >>= run h . k
-            ZRange           a x :>>= k -> f h x (readScoreList "ZRANGE" a)           >>= run h . k
-            ZRangeByLex        x :>>= k -> f h x (readList "ZRANGEBYLEX")             >>= run h . k
-            ZRangeByScore    a x :>>= k -> f h x (readScoreList "ZRANGEBYSCORE" a)    >>= run h . k
-            ZRank              x :>>= k -> f h x (readInt'Null  "ZRANK")              >>= run h . k
-            ZRem               x :>>= k -> f h x (readInt "ZREM")                     >>= run h . k
-            ZRemRangeByLex     x :>>= k -> f h x (readInt "ZREMRANGEBYLEX")           >>= run h . k
-            ZRemRangeByRank    x :>>= k -> f h x (readInt "ZREMRANGEBYRANK")          >>= run h . k
-            ZRemRangeByScore   x :>>= k -> f h x (readInt "ZREMRANGEBYSCORE")         >>= run h . k
-            ZRevRange        a x :>>= k -> f h x (readScoreList "ZREVRANGE" a)        >>= run h . k
-            ZRevRangeByScore a x :>>= k -> f h x (readScoreList "ZREVRANGEBYSCORE" a) >>= run h . k
-            ZRevRank           x :>>= k -> f h x (readInt'Null  "ZREVRANK")           >>= run h . k
-            ZScan              x :>>= k -> f h x (readScan "ZSCAN")                   >>= run h . k
-            ZScore             x :>>= k -> f h x (readBulk'Null "ZSCORE")             >>= run h . k
-            ZUnionStore        x :>>= k -> f h x (readInt "ZUNIONSTORE")              >>= run h . k
+            ZAdd               x :>>= k -> f h x (readInt "ZADD")                     >>= \(a, i) -> run h (i:ii) $ k a
+            ZCard              x :>>= k -> f h x (readInt "ZCARD")                    >>= \(a, i) -> run h (i:ii) $ k a
+            ZCount             x :>>= k -> f h x (readInt "ZCOUNT")                   >>= \(a, i) -> run h (i:ii) $ k a
+            ZIncrBy            x :>>= k -> f h x (readBulk "ZINCRBY")                 >>= \(a, i) -> run h (i:ii) $ k a
+            ZInterStore        x :>>= k -> f h x (readInt "ZINTERSTORE")              >>= \(a, i) -> run h (i:ii) $ k a
+            ZLexCount          x :>>= k -> f h x (readInt "ZLEXCOUNT")                >>= \(a, i) -> run h (i:ii) $ k a
+            ZRange           y x :>>= k -> f h x (readScoreList "ZRANGE" y)           >>= \(a, i) -> run h (i:ii) $ k a
+            ZRangeByLex        x :>>= k -> f h x (readList "ZRANGEBYLEX")             >>= \(a, i) -> run h (i:ii) $ k a
+            ZRangeByScore    y x :>>= k -> f h x (readScoreList "ZRANGEBYSCORE" y)    >>= \(a, i) -> run h (i:ii) $ k a
+            ZRank              x :>>= k -> f h x (readInt'Null  "ZRANK")              >>= \(a, i) -> run h (i:ii) $ k a
+            ZRem               x :>>= k -> f h x (readInt "ZREM")                     >>= \(a, i) -> run h (i:ii) $ k a
+            ZRemRangeByLex     x :>>= k -> f h x (readInt "ZREMRANGEBYLEX")           >>= \(a, i) -> run h (i:ii) $ k a
+            ZRemRangeByRank    x :>>= k -> f h x (readInt "ZREMRANGEBYRANK")          >>= \(a, i) -> run h (i:ii) $ k a
+            ZRemRangeByScore   x :>>= k -> f h x (readInt "ZREMRANGEBYSCORE")         >>= \(a, i) -> run h (i:ii) $ k a
+            ZRevRange        y x :>>= k -> f h x (readScoreList "ZREVRANGE" y)        >>= \(a, i) -> run h (i:ii) $ k a
+            ZRevRangeByScore y x :>>= k -> f h x (readScoreList "ZREVRANGEBYSCORE" y) >>= \(a, i) -> run h (i:ii) $ k a
+            ZRevRank           x :>>= k -> f h x (readInt'Null  "ZREVRANK")           >>= \(a, i) -> run h (i:ii) $ k a
+            ZScan              x :>>= k -> f h x (readScan "ZSCAN")                   >>= \(a, i) -> run h (i:ii) $ k a
+            ZScore             x :>>= k -> f h x (readBulk'Null "ZSCORE")             >>= \(a, i) -> run h (i:ii) $ k a
+            ZUnionStore        x :>>= k -> f h x (readInt "ZUNIONSTORE")              >>= \(a, i) -> run h (i:ii) $ k a
 
             -- Sort
-            Sort x :>>= k -> f h x (readList "SORT") >>= run h . k
+            Sort x :>>= k -> f h x (readList "SORT") >>= \(a, i) -> run h (i:ii) $ k a
 
             -- HyperLogLog
-            PfAdd   x :>>= k -> f h x (readBool "PFADD")        >>= run h . k
-            PfCount x :>>= k -> f h x (readInt "PFCOUNT")       >>= run h . k
-            PfMerge x :>>= k -> f h x (matchStr "PFMERGE" "OK") >>= run h . k
+            PfAdd   x :>>= k -> f h x (readBool "PFADD")        >>= \(a, i) -> run h (i:ii) $ k a
+            PfCount x :>>= k -> f h x (readInt "PFCOUNT")       >>= \(a, i) -> run h (i:ii) $ k a
+            PfMerge x :>>= k -> f h x (matchStr "PFMERGE" "OK") >>= \(a, i) -> run h (i:ii) $ k a
 
             -- Pub/Sub
-            Publish x :>>= k -> getNow h x (readInt "PUBLISH") >>= run h . k
+            Publish x :>>= k -> getNow h x (readInt "PUBLISH") >>= \(a, i) -> run h (i:ii) $ k a
 
-withConnection :: (Connection -> IO a) -> Client a
+withConnection :: (Connection -> IO (a, [IO ()])) -> Client a
 withConnection f = do
     p <- ask
     let c = connPool p
         s = settings p
     liftIO $ case sMaxWaitQueue s of
-        Nothing -> withResource c $ \h -> f h `finally` C.sync h
+        Nothing -> withResource c $ \h -> f h >>= \(a, i) -> sequence_ i >> return a
         Just  q -> tryWithResource c (go p) >>= maybe (retry q c p) return
   where
     go p h = do
         atomicModifyIORef' (failures p) $ \n -> (if n > 0 then n - 1 else 0, ())
-        f h `finally` C.sync h
+        f h >>= \(a, i) -> sequence_ i >> return a
 
     retry q c p = do
         k <- atomicModifyIORef' (failures p) $ \n -> (n + 1, n)
@@ -301,29 +304,33 @@ withConnection f = do
             throwIO ConnectionsBusy
         withResource c (go p)
 
-getResult :: Connection -> Resp -> (Resp -> Result a) -> IO a
-getResult h x g = do
+getLazy :: Connection -> Resp -> (Resp -> Result a) -> IO (a, IO ())
+getLazy h x g = do
     r <- newIORef (throw $ RedisError "missing response")
     C.request x r h
-    unsafeInterleaveIO $ do
+    a <- unsafeInterleaveIO $ do
         C.sync h
         either throwIO return =<< g <$> readIORef r
-{-# INLINE getResult #-}
+    return (a, a `seq` return ())
+{-# INLINE getLazy #-}
 
--- Like 'getResult' but triggers immediate execution.
-getNow :: Connection -> Resp -> (Resp -> Result a) -> IO a
+getNow :: Connection -> Resp -> (Resp -> Result a) -> IO (a, IO ())
 getNow h x g = do
     r <- newIORef (throw $ RedisError "missing response")
     C.request x r h
     C.sync h
-    either throwIO return =<< g <$> readIORef r
+    a <- either throwIO return =<< g <$> readIORef r
+    return (a, return ())
 {-# INLINE getNow #-}
 
-getDirect :: Connection -> Resp -> (Resp -> Result a) -> IO a
-getDirect c r f = do
+-- 'getEager' bypasses the connection buffer and directly sends and
+-- receives through the underlying socket.
+getEager :: Connection -> Resp -> (Resp -> Result a) -> IO (a, IO ())
+getEager c r f = do
     C.send c [r]
-    either throwIO return =<< f <$> C.receive c
-{-# INLINE getDirect #-}
+    a <- either throwIO return =<< f <$> C.receive c
+    return (a, return ())
+{-# INLINE getEager #-}
 
 -- Update a 'Connection's send/recv timeout. Values > 0 get an additional
 -- 10s grace period added to give redis enough time to finish first.
