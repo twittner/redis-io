@@ -1,4 +1,10 @@
-{-# LANGUAGE OverloadedStrings #-}
+-- This Source Code Form is subject to the terms of the Mozilla Public
+-- License, v. 2.0. If a copy of the MPL was not distributed with this
+-- file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+{-# LANGUAGE ExtendedDefaultRules       #-}
+{-# LANGUAGE OverloadedStrings          #-}
+{-# OPTIONS_GHC -fno-warn-type-defaults #-}
 
 module Main (main) where
 
@@ -6,13 +12,15 @@ import Control.Applicative
 import Control.Monad
 import Criterion
 import Criterion.Main
-import Data.ByteString
+import Data.ByteString.Lazy
 import Data.Monoid
 import Data.Redis
 import Network.Redis.IO
 
 import qualified Database.Redis as Hedis
 import qualified System.Logger  as Logger
+
+default (ByteString, Int)
 
 main :: IO ()
 main = do

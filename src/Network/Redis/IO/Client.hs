@@ -14,7 +14,7 @@ import Control.Exception (throw, throwIO)
 import Control.Monad.Catch
 import Control.Monad.Operational
 import Control.Monad.Reader
-import Data.ByteString (ByteString)
+import Data.ByteString.Lazy (ByteString)
 import Data.Int
 import Data.IORef
 import Data.Redis

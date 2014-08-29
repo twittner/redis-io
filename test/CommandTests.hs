@@ -2,13 +2,16 @@
 -- License, v. 2.0. If a copy of the MPL was not distributed with this
 -- file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ExtendedDefaultRules       #-}
+{-# LANGUAGE OverloadedStrings          #-}
+{-# OPTIONS_GHC -fno-warn-type-defaults #-}
 
 module CommandTests (tests) where
 
 import Control.Monad (void)
 import Control.Monad.IO.Class
-import Data.ByteString (ByteString)
+import Data.ByteString.Conversion
+import Data.ByteString.Lazy (ByteString)
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async
 import Data.Monoid
@@ -18,6 +21,8 @@ import Data.Redis
 import Network.Redis.IO
 
 import qualified Data.Set as Set
+
+default (ByteString, Int)
 
 tests :: Pool -> TestTree
 tests p = testGroup "commands"
@@ -31,9 +36,9 @@ tests p = testGroup "commands"
         , testCase "lastsave"     $ lastsave     $$ (>  1408021976)
         ]
     , testGroup "connection"
-        [ testCase "ping"   $ ping         $$ (== ())
-        , testCase "echo"   $ echo "True"  $$ (== True)
-        , testCase "select" $ select 0     $$ (== ())
+        [ testCase "ping"   $ ping      $$ (== ())
+        , testCase "echo"   $ echo True $$ (== True)
+        , testCase "select" $ select 0  $$ (== ())
         ]
     , testGroup "keys"
         [ testCase "randomkey1" $
@@ -70,15 +75,15 @@ tests p = testGroup "commands"
         [ testCase "append" $
             with [("foo", "xx")] (append "foo" "y")(== 3)
         , testCase "get" $
-            with [("foo", "42")] (get "foo") (== Just (42 :: Int))
+            with [("foo", "42")] (get "foo") (== Just 42)
         , testCase "getrange" $
-            with [("foo", "42")] (getrange "foo" 0 0) (== (4 :: Int))
+            with [("foo", "42")] (getrange "foo" 0 0) (== 4)
         , testCase "getset" $
-            with [("foo", "42")] (getset "foo" "0") (== Just (42 ::Int))
+            with [("foo", "42")] (getset "foo" 0) (== Just 42)
         , testCase "mget" $
             with [("foo", "42"), ("bar", "43")]
                  (mget ("foo" :| ["bar", "xxx"]))
-                 (== ([Just 42, Just 43, Nothing] :: [Maybe Int]))
+                 (== [Just 42, Just 43, Nothing])
         , testCase "msetnx" $
              msetnx (("aaa", "4343") :| [("bcbx", "shsh")]) $$ (== True)
         , testCase "set" $ set "aa" "bb" none $$ (== True)
@@ -87,17 +92,17 @@ tests p = testGroup "commands"
         ]
     , testGroup "bits"
         [ testCase "bitand" $ do
-            with [("n1", "0"), ("n2", "1")] (bitand "r" ("n1" :| ["n2"])) (== 1)
-            get "r" $$ (== Just (0 :: Int))
+            with [("n1", 0), ("n2", 1)] (bitand "r" ("n1" :| ["n2"])) (== 1)
+            get "r" $$ (== Just 0)
         , testCase "bitor" $ do
-            with [("n1", "0"), ("n2", "1")] (bitor "r" ("n1" :| ["n2"])) (== 1)
-            get "r" $$ (== Just (1 :: Int))
+            with [("n1", 0), ("n2", 1)] (bitor "r" ("n1" :| ["n2"])) (== 1)
+            get "r" $$ (== Just 1)
         , testCase "bitxor" $ do
-            with [("n1", "0"), ("n2", "1")] (bitor "r" ("n1" :| ["n2"])) (== 1)
-            get "r" $$ (== Just (1 :: Int))
+            with [("n1", 0), ("n2", 1)] (bitor "r" ("n1" :| ["n2"])) (== 1)
+            get "r" $$ (== Just 1)
         , testCase "bitnot" $ do
-            with [("n1", "0")] (bitnot "r" "n1") (== 1)
-            get "r" $$ (== Just ("\xcf" :: ByteString))
+            with [("n1", 0)] (bitnot "r" "n1") (== 1)
+            get "r" $$ (== Just "\xcf")
         , testCase "bitcount" $ with [("n1", "1")] (bitcount "n1" (range 0 0)) (== 3)
         , testCase "getbit" $ with [("n1", "1")] (getbit "n1" 0)      (== 0)
         , testCase "setbit" $ with [("n1", "1")] (setbit "n1" 0 True) (== 0)
@@ -111,17 +116,17 @@ tests p = testGroup "commands"
         , testCase "incrbyfloat" $ with [("x", "2")] (incrbyfloat "x" 0.5) (== 2.5)
         ]
     , testGroup "hashes"
-        [ testCase "hset" $ hset "h" "k" "42" $$ (== True)
+        [ testCase "hset" $ hset "h" "k" 42 $$ (== True)
         , testCase "hget" $
-            bracket (hset "h" "k" "4") (del (one "h")) (hget "h" "k") (== Just (4 :: Int))
+            bracket (hset "h" "k" 4) (del (one "h")) (hget "h" "k") (== Just 4)
         , testCase "hexists" $ do
             hexists "h" "x" $$ (== False)
-            bracket (hset "h" "k" "4") (del (one "h")) (hexists "h" "k") (== True)
-            bracket (hset "h" "k" "4") (del (one "h")) (hexists "h" "j") (== False)
+            bracket (hset "h" "k" 4) (del (one "h")) (hexists "h" "k") (== True)
+            bracket (hset "h" "k" 4) (del (one "h")) (hexists "h" "j") (== False)
         , testCase "hgetall" $ do
-            bracket (hmset "h" (("k", "4") :| [("j", "5")])) (del (one "h"))
+            bracket (hmset "h" (("k", 4) :| [("j", 5)])) (del (one "h"))
                     (hgetall "h")
-                    (== ([("k", 4), ("j", 5)] :: [(ByteString, Int)]))
+                    (== [("k", 4), ("j", 5)])
         , testCase "hmget" $ do
             bracket (hmset "h" (("k", "4") :| [("j", "5")])) (del (one "h"))
                     (hmget "h" ("k" :| ["j"]))
@@ -145,127 +150,127 @@ tests p = testGroup "commands"
                     (== ([4, 5] :: [Int]))
         ]
     , testGroup "lists"
-        [ testCase "lpush" $ lpush "l" ("0" :| ["1", "2", "3"]) $$ (== 4)
+        [ testCase "lpush" $ lpush "l" (0 :| [1, 2, 3]) $$ (== 4)
         , testCase "lpop" $
-            bracket (lpush "l" ("1" :| ["2", "3"])) (del (one "l")) (lpop "l") (== Just (3 :: Int))
+            bracket (lpush "l" (1 :| [2, 3])) (del (one "l")) (lpop "l") (== Just 3)
         , testCase "rpop" $
-            bracket (rpush "l" ("1" :| ["2", "3"])) (del (one "l")) (rpop "l") (== Just (3 :: Int))
+            bracket (rpush "l" (1 :| [2, 3])) (del (one "l")) (rpop "l") (== Just 3)
         , testCase "rpoplpush" $
-            bracket (rpush "l" ("1" :| ["2", "3"])) (del (one "l")) (rpoplpush "l" "l") (== Just (3 :: Int))
+            bracket (rpush "l" (1 :| [2, 3])) (del (one "l")) (rpoplpush "l" "l") (== Just 3)
         , testCase "lpushx" $
-            bracket (lpush "l" ("1" :| ["2", "3"])) (del (one "l"))
-                    (lpushx "l" "5")
+            bracket (lpush "l" (1 :| [2, 3])) (del (one "l"))
+                    (lpushx "l" 5)
                     (== 4)
         , testCase "rpushx" $
-            bracket (rpush "l" ("1" :| ["2", "3"])) (del (one "l"))
-                    (rpushx "l" "5")
+            bracket (rpush "l" (1 :| [2, 3])) (del (one "l"))
+                    (rpushx "l" 5)
                     (== 4)
         , testCase "lindex" $
-            bracket (lpush "l" ("1" :| ["2", "3"])) (del (one "l"))
+            bracket (lpush "l" (1 :| [2, 3])) (del (one "l"))
                     (lindex "l" 0)
-                    (== Just (3 :: Int))
+                    (== Just 3)
         , testCase "linsert" $
-            bracket (lpush "l" ("1" :| ["2", "3"])) (del (one "l"))
-                    (linsert "l" Before "2" "0")
+            bracket (lpush "l" (1 :| [2, 3])) (del (one "l"))
+                    (linsert "l" Before 2 0)
                     (== 4)
         , testCase "llen" $
-            bracket (lpush "l" ("1" :| ["2", "3"])) (del (one "l"))
+            bracket (lpush "l" (1 :| [2, 3])) (del (one "l"))
                     (llen "l")
                     (== 3)
         , testCase "lrange" $
-            bracket (lpush "l" ("1" :| ["2", "3"])) (del (one "l"))
+            bracket (lpush "l" (1 :| [2, 3])) (del (one "l"))
                     (lrange "l" 1 2)
-                    (== ([2, 1] :: [Int]))
+                    (== [2, 1])
         , testCase "lrem" $ do
-            bracket (lpush "l" ("1" :| ["2", "1"])) (del (one "l"))
-                    (lrem "l" 1 "1")
+            bracket (lpush "l" (1 :| [2, 1])) (del (one "l"))
+                    (lrem "l" 1 1)
                     (== 1)
-            bracket (lpush "l" ("1" :| ["2", "1"])) (del (one "l"))
-                    (lrem "l" (-1) "1")
+            bracket (lpush "l" (1 :| [2, 1])) (del (one "l"))
+                    (lrem "l" (-1) 1)
                     (== 1)
-            bracket (lpush "l" ("1" :| ["2", "1"])) (del (one "l"))
-                    (lrem "l" 0 "1")
+            bracket (lpush "l" (1 :| [2, 1])) (del (one "l"))
+                    (lrem "l" 0 1)
                     (== 2)
         , testCase "lset" $
-            bracket (lpush "l" ("1" :| ["2", "1"])) (del (one "l"))
-                    (lset "l" 1 "1" >> lrange "l" 0 3)
-                    (== ([1, 1, 1] :: [Int]))
+            bracket (lpush "l" (1 :| [2, 1])) (del (one "l"))
+                    (lset "l" 1 1 >> lrange "l" 0 3)
+                    (== [1, 1, 1])
         , testCase "ltrim" $
-            bracket (lpush "l" ("1" :| ["2", "1"])) (del (one "l"))
+            bracket (lpush "l" (1 :| [2, 1])) (del (one "l"))
                     (ltrim "l" 0 1 >> lrange "l" 0 3)
-                    (== ([1, 2] :: [Int]))
+                    (== [1, 2])
         ]
     , testGroup "sets"
-        [ testCase "sadd" $ sadd "a" (one "0") $$ (== 1)
+        [ testCase "sadd" $ sadd "a" (one 0) $$ (== 1)
         , testCase "scard" $
-            bracket (sadd "s" ("1" :| ["2", "1"])) (del (one "s"))
+            bracket (sadd "s" (1 :| [2, 1])) (del (one "s"))
                     (scard "s")
                     (== 2)
         , testCase "spop" $
-            bracket (sadd "s" (one "1")) (del (one "s"))
+            bracket (sadd "s" (one 1)) (del (one "s"))
                     (spop "s")
-                    (== Just (1 :: Int))
+                    (== Just 1)
         , testCase "srandmember" $
-            bracket (sadd "s" (one "1")) (del (one "s"))
+            bracket (sadd "s" (one 1)) (del (one "s"))
                     (srandmember "s" One)
-                    (== [1 :: Int])
+                    (== [1])
         , testCase "srem" $
-            bracket (sadd "s" (one "1")) (del (one "s"))
-                    (srem "s" (one "1"))
+            bracket (sadd "s" (one 1)) (del (one "s"))
+                    (srem "s" (one 1))
                     (== 1)
         , testCase "sismember" $
-            bracket (sadd "s" ("1" :| ["2", "1"])) (del (one "s"))
-                    (sismember "s" "2")
+            bracket (sadd "s" (1 :| [2, 1])) (del (one "s"))
+                    (sismember "s" 2)
                     (== True)
         , testCase "smembers" $
-            bracket (sadd "s" ("1" :| ["2", "1"])) (del (one "s"))
+            bracket (sadd "s" (1 :| [2, 1])) (del (one "s"))
                     (smembers "s")
-                    ((== Set.fromList ([1, 2] :: [Int])) . Set.fromList)
+                    ((== Set.fromList [1, 2]) . Set.fromList)
         , testCase "sdiff" $
-            bracket (sadd "x" ("1" :| ["2"]) >> sadd "y" (one "1")) (del ("x" :| ["y"]))
+            bracket (sadd "x" (1 :| [2]) >> sadd "y" (one 1)) (del ("x" :| ["y"]))
                     (sdiff ("x" :| ["y"]))
-                    (== [2 :: Int])
+                    (== [2])
         , testCase "sdiffstore" $
-            bracket (sadd "x" ("1" :| ["2"]) >> sadd "y" (one "1")) (del ("x" :| ["y"]))
+            bracket (sadd "x" (1 :| [2]) >> sadd "y" (one 1)) (del ("x" :| ["y"]))
                     (sdiffstore "z" ("x" :| ["y"]) >> smembers "z")
-                    (== [2 :: Int])
+                    (== [2])
         , testCase "sinter" $
-            bracket (sadd "x" ("1" :| ["2"]) >> sadd "y" (one "1")) (del ("x" :| ["y"]))
+            bracket (sadd "x" (1 :| [2]) >> sadd "y" (one 1)) (del ("x" :| ["y"]))
                     (sinter ("x" :| ["y"]))
-                    (== [1 :: Int])
+                    (== [1])
         , testCase "sinterstore" $
-            bracket (sadd "x" ("1" :| ["2"]) >> sadd "y" (one "1")) (del ("x" :| ["y"]))
+            bracket (sadd "x" (1 :| [2]) >> sadd "y" (one 1)) (del ("x" :| ["y"]))
                     (sinterstore "z" ("x" :| ["y"]) >> smembers "z")
-                    (== [1 :: Int])
+                    (== [1])
         , testCase "sunion" $
-            bracket (sadd "x" ("1" :| ["2"]) >> sadd "y" (one "1")) (del ("x" :| ["y"]))
+            bracket (sadd "x" (1 :| [2]) >> sadd "y" (one 1)) (del ("x" :| ["y"]))
                     (sunion ("x" :| ["y"]))
-                    ((== Set.fromList ([1, 2] :: [Int])) . Set.fromList)
+                    ((== Set.fromList [1, 2]) . Set.fromList)
         , testCase "sunionstore" $
-            bracket (sadd "x" ("1" :| ["2"]) >> sadd "y" (one "1")) (del ("x" :| ["y"]))
+            bracket (sadd "x" (1 :| [2]) >> sadd "y" (one 1)) (del ("x" :| ["y"]))
                     (sunionstore "z" ("x" :| ["y"]) >> smembers "z")
-                    ((== Set.fromList ([1, 2] :: [Int])) . Set.fromList)
+                    ((== Set.fromList [1, 2]) . Set.fromList)
         ]
     , testGroup "sorted sets"
-        [ testCase "zadd" $ zadd "w" (one (1.0, "0")) $$ (== 1)
+        [ testCase "zadd" $ zadd "w" (one (1.0, 0)) $$ (== 1)
         , testCase "zcard" $
-            bracket (zadd "v" ((1, "1") :| [(2, "2"), (3, "1")])) (del (one "v"))
+            bracket (zadd "v" ((1, 1) :| [(2, 2), (3, 1)])) (del (one "v"))
                     (zcard "v")
                     (== 2)
         , testCase "zcount" $
-            bracket (zadd "v" ((1, "1") :| [(2, "2"), (3, "3")])) (del (one "v"))
+            bracket (zadd "v" ((1, 1) :| [(2, 2), (3, 3)])) (del (one "v"))
                     (zcount "v" 1 2)
                     (== 2)
         , testCase "zincrby" $
-            bracket (zadd "v" ((1, "1") :| [(2, "2"), (3, "3")])) (del (one "v"))
-                    (zincrby "v" 0.5 "2")
+            bracket (zadd "v" ((1, 1) :| [(2, 2), (3, 3)])) (del (one "v"))
+                    (zincrby "v" 0.5 2)
                     (== (2.5 :: Double))
         , testCase "zinterstore" $
-            bracket (zadd "v" ((1, "1") :| [(2, "2"), (3, "3")])) (del (one "v"))
+            bracket (zadd "v" ((1, 1) :| [(2, 2), (3, 3)])) (del (one "v"))
                     (zinterstore "z" (one "v") [3] Max)
                     (== 3)
         , testCase "zunionstore" $
-            bracket (zadd "v" ((1, "1") :| [(2, "2"), (3, "3")])) (del (one "v"))
+            bracket (zadd "v" ((1, 1) :| [(2, 2), (3, 3)])) (del (one "v"))
                     (zunionstore "z" (one "v") [3] Max)
                     (== 3)
         , testCase "zlexcount" $
@@ -311,17 +316,17 @@ tests p = testGroup "commands"
         ]
     , testGroup "sort"
         [ testCase "sort" $
-            bracket (lpush "l" ("5" :| ["2", "3", "1", "7"])) (del (one "l"))
+            bracket (lpush "l" (5 :| [2, 3, 1, 7])) (del (one "l"))
                     (sort "l" (limit 0 10 <> asc))
                     (== ([1, 2, 3, 5, 7] :: [Int]))
         ]
     , testGroup "hyperloglog"
         [ testCase "pfcount" $
-            bracket (pfadd "p" ("5" :| ["2", "3", "1", "7"])) (del (one "p"))
+            bracket (pfadd "p" (5 :| [2, 3, 1, 7])) (del (one "p"))
                     (pfcount (one "p"))
                     (== 5)
         , testCase "pfmerge" $
-            bracket (pfadd "p" (one "5") >> pfadd "q" (one "6")) (del ("p" :| ["q"]))
+            bracket (pfadd "p" (one 5) >> pfadd "q" (one 6)) (del ("p" :| ["q"]))
                     (pfmerge "t" ("p" :| ["q"]) >> pfcount (one "t"))
                     (== 2)
         ]
@@ -346,11 +351,11 @@ tests p = testGroup "commands"
         void $ r
         liftIO $ assertBool (show x) (t x)
 
-    with :: Show a => [(Key, ByteString)] -> Redis IO a -> (a -> Bool) -> Assertion
+    with :: (ToByteString b, Show a) => [(Key, b)] -> Redis IO a -> (a -> Bool) -> Assertion
     with kv r f = bracket (mset (head kv :| tail kv)) (del (fst (head kv) :| map fst (tail kv))) r f
 
     withFoo :: Show a => Redis IO a -> (a -> Bool) -> Assertion
-    withFoo = with [("foo", "42")]
+    withFoo = with [("foo", 42 :: Int)]
 
 pubSubTest :: Pool -> IO ()
 pubSubTest p = do
