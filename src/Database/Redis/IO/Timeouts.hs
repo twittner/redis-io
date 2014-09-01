@@ -2,7 +2,7 @@
 -- License, v. 2.0. If a copy of the MPL was not distributed with this
 -- file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-module Network.Redis.IO.Timeouts
+module Database.Redis.IO.Timeouts
     ( TimeoutManager
     , create
     , destroy
@@ -18,7 +18,7 @@ import Control.Exception (mask_, bracket)
 import Control.Reaper
 import Control.Monad
 import Data.IORef
-import Network.Redis.IO.Types (Milliseconds (..), ignore)
+import Database.Redis.IO.Types (Milliseconds (..), ignore)
 
 data TimeoutManager = TimeoutManager
     { roundtrip :: !Int

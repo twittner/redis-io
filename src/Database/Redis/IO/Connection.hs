@@ -5,7 +5,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TupleSections     #-}
 
-module Network.Redis.IO.Connection
+module Database.Redis.IO.Connection
     ( Connection
     , settings
     , resolve
@@ -28,10 +28,10 @@ import Data.Maybe (isJust)
 import Data.Redis
 import Data.Sequence (Seq, (|>))
 import Data.Word
+import Database.Redis.IO.Settings
+import Database.Redis.IO.Types
+import Database.Redis.IO.Timeouts (TimeoutManager, withTimeout)
 import Network
-import Network.Redis.IO.Settings
-import Network.Redis.IO.Types
-import Network.Redis.IO.Timeouts (TimeoutManager, withTimeout)
 import Network.Socket hiding (connect, close, send, recv)
 import Network.Socket.ByteString (recv, sendMany)
 import Pipes

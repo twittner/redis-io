@@ -8,17 +8,17 @@
 
 module CommandTests (tests) where
 
+import Control.Concurrent (threadDelay)
+import Control.Concurrent.Async
 import Control.Monad (void)
 import Control.Monad.IO.Class
 import Data.ByteString.Conversion
 import Data.ByteString.Lazy (ByteString)
-import Control.Concurrent (threadDelay)
-import Control.Concurrent.Async
 import Data.Monoid
+import Data.Redis
+import Database.Redis.IO
 import Test.Tasty
 import Test.Tasty.HUnit
-import Data.Redis
-import Network.Redis.IO
 
 import qualified Data.Set as Set
 

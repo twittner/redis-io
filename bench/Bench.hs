@@ -15,7 +15,7 @@ import Criterion.Main
 import Data.ByteString.Lazy
 import Data.Monoid
 import Data.Redis
-import Network.Redis.IO
+import Database.Redis.IO
 
 import qualified Database.Redis as Hedis
 import qualified System.Logger  as Logger

@@ -9,7 +9,7 @@ copyright:           (c) 2014 Toralf Wittner
 homepage:            https://github.com/twittner/redis-io/
 bug-reports:         https://github.com/twittner/redis-io/issues
 stability:           experimental
-category:            Data
+category:            Database
 build-type:          Simple
 cabal-version:       >= 1.10
 
@@ -27,14 +27,14 @@ library
     ghc-prof-options: -prof -auto-all
 
     exposed-modules:
-        Network.Redis.IO
+        Database.Redis.IO
 
     other-modules:
-        Network.Redis.IO.Client
-        Network.Redis.IO.Connection
-        Network.Redis.IO.Settings
-        Network.Redis.IO.Timeouts
-        Network.Redis.IO.Types
+        Database.Redis.IO.Client
+        Database.Redis.IO.Connection
+        Database.Redis.IO.Settings
+        Database.Redis.IO.Timeouts
+        Database.Redis.IO.Types
 
     build-depends:
         attoparsec       >= 0.11   && < 0.13

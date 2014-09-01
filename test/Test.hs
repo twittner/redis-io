@@ -6,7 +6,7 @@ module Main (main) where
 
 import Control.Exception (finally)
 import CommandTests (tests)
-import Network.Redis.IO
+import Database.Redis.IO
 import Test.Tasty
 
 import qualified System.Logger as Logger

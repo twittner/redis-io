@@ -2,7 +2,7 @@
 -- License, v. 2.0. If a copy of the MPL was not distributed with this
 -- file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-module Network.Redis.IO
+module Database.Redis.IO
     ( -- * Redis client
       Client
     , runRedis
@@ -33,6 +33,6 @@ module Network.Redis.IO
     , Timeout         (..)
     ) where
 
-import Network.Redis.IO.Client
-import Network.Redis.IO.Settings
-import Network.Redis.IO.Types
+import Database.Redis.IO.Client
+import Database.Redis.IO.Settings
+import Database.Redis.IO.Types

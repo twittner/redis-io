@@ -7,7 +7,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE RankNTypes                 #-}
 
-module Network.Redis.IO.Client where
+module Database.Redis.IO.Client where
 
 import Control.Applicative
 import Control.Exception (throw, throwIO)
@@ -20,18 +20,18 @@ import Data.IORef
 import Data.Redis
 import Data.Word
 import Data.Pool hiding (Pool)
-import Network.Redis.IO.Connection (Connection)
-import Network.Redis.IO.Settings
-import Network.Redis.IO.Timeouts (TimeoutManager)
-import Network.Redis.IO.Types (ConnectionError (..))
+import Database.Redis.IO.Connection (Connection)
+import Database.Redis.IO.Settings
+import Database.Redis.IO.Timeouts (TimeoutManager)
+import Database.Redis.IO.Types (ConnectionError (..))
 import Prelude hiding (readList)
 import System.Logger.Class hiding (Settings, settings, eval)
 import System.IO.Unsafe (unsafeInterleaveIO)
 
-import qualified Data.Pool                   as P
-import qualified Network.Redis.IO.Connection as C
-import qualified System.Logger               as Logger
-import qualified Network.Redis.IO.Timeouts   as TM
+import qualified Data.Pool                    as P
+import qualified Database.Redis.IO.Connection as C
+import qualified System.Logger                as Logger
+import qualified Database.Redis.IO.Timeouts   as TM
 
 -- | Connection pool.
 data Pool = Pool

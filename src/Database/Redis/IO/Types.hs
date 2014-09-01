@@ -5,7 +5,7 @@
 {-# LANGUAGE DeriveDataTypeable         #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
-module Network.Redis.IO.Types where
+module Database.Redis.IO.Types where
 
 import Control.Exception (Exception, SomeException, catch)
 import Data.Typeable

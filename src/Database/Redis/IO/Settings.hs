@@ -4,11 +4,11 @@
 
 {-# LANGUAGE OverloadedStrings #-}
 
-module Network.Redis.IO.Settings where
+module Database.Redis.IO.Settings where
 
 import Data.Time
 import Data.Word
-import Network.Redis.IO.Types (Milliseconds (..))
+import Database.Redis.IO.Types (Milliseconds (..))
 
 data Settings = Settings
     { sHost            :: String
