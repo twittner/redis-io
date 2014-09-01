@@ -1,6 +1,6 @@
 name:                redis-io
 version:             0.2
-synopsis:            Yet another redis client
+synopsis:            Yet another redis client.
 license:             OtherLicense
 license-file:        LICENSE
 author:              Toralf Wittner

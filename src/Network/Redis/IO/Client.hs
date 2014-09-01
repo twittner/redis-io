@@ -33,6 +33,7 @@ import qualified Network.Redis.IO.Connection as C
 import qualified System.Logger               as Logger
 import qualified Network.Redis.IO.Timeouts   as TM
 
+-- | Connection pool.
 data Pool = Pool
     { settings :: Settings
     , connPool :: P.Pool Connection
@@ -41,6 +42,7 @@ data Pool = Pool
     , timeouts :: TimeoutManager
     }
 
+-- | Redis client monad.
 newtype Client a = Client
     { client :: ReaderT Pool IO a
     } deriving ( Functor
@@ -84,12 +86,26 @@ shutdown p = liftIO $ P.destroyAllResources (connPool p)
 runRedis :: MonadIO m => Pool -> Client a -> m a
 runRedis p a = liftIO $ runReaderT (client a) p
 
+-- | Execute the given redis commands stepwise. I.e. every
+-- command is send to the server and the response fetched and parsed before
+-- the next command. A failing command which produces a 'RedisError' will
+-- interrupt the command sequence and the error will be thrown as an
+-- exception.
 stepwise :: Redis IO a -> Client a
 stepwise a = withConnection (flip (eval getEager) a)
 
+-- | Execute the given redis commands pipelined. I.e. commands are send in
+-- batches to the server and the responses are fetched and parsed after
+-- a full batch has been sent. A failing command which produces
+-- a 'RedisError' will /not/ prevent subsequent commands from being
+-- executed by the redis server. However the first error will be thrown as
+-- an exception.
 pipelined :: Redis IO a -> Client a
 pipelined a = withConnection (flip (eval getLazy) a)
 
+-- | Execute the given publish\/subscribe commands. The first parameter is
+-- the callback function which will be invoked with channel and message
+-- once messages arrive.
 pubSub :: (ByteString -> ByteString -> PubSub IO ()) -> PubSub IO () -> Client ()
 pubSub f a = withConnection (loop a)
   where

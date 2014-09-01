@@ -16,9 +16,9 @@ newtype Milliseconds = Ms { ms :: Int } deriving (Eq, Show, Num)
 -- ConnectionError
 
 data ConnectionError
-    = ConnectionsBusy
-    | ConnectionClosed
-    | ConnectTimeout
+    = ConnectionsBusy  -- ^ All connections are in use and wait queue is full.
+    | ConnectionClosed -- ^ The connection has been closed unexpectedly.
+    | ConnectTimeout   -- ^ Connecting to redis server took too long.
     deriving Typeable
 
 instance Exception ConnectionError
@@ -31,6 +31,7 @@ instance Show ConnectionError where
 -----------------------------------------------------------------------------
 -- InternalError
 
+-- | General error, e.g. parsing redis responses failed.
 data InternalError = InternalError String
     deriving Typeable
 
@@ -42,6 +43,7 @@ instance Show InternalError where
 -----------------------------------------------------------------------------
 -- Timeout
 
+-- | A single send-receive cycle took too long.
 data Timeout = Timeout String
     deriving Typeable
 

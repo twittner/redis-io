@@ -3,7 +3,20 @@
 -- file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 module Network.Redis.IO
-    ( Settings
+    ( -- * Redis client
+      Client
+    , runRedis
+    , stepwise
+    , pipelined
+    , pubSub
+
+    -- * Connection pool
+    , Pool
+    , mkPool
+    , shutdown
+
+    -- * Client and pool settings
+    , Settings
     , defSettings
     , setHost
     , setPort
@@ -13,16 +26,6 @@ module Network.Redis.IO
     , setPoolStripes
     , setConnectTimeout
     , setSendRecvTimeout
-
-    , Pool
-    , mkPool
-    , shutdown
-
-    , Client
-    , runRedis
-    , stepwise
-    , pipelined
-    , pubSub
 
     -- * Exceptions
     , ConnectionError (..)

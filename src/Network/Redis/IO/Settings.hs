@@ -21,6 +21,16 @@ data Settings = Settings
     , sSendRecvTimeout :: Milliseconds
     }
 
+-- | Default settings.
+--
+-- * host = localhost
+-- * port = 6379
+-- * idle timeout = 60s
+-- * stripes = 2
+-- * connections per stripe = 25
+-- * max. wait queue = unbounded
+-- * connect timeout = 5s
+-- * send-receive timeout = 10s
 defSettings :: Settings
 defSettings = Settings "localhost" 6379
     60      -- idle timeout
@@ -43,6 +53,10 @@ setIdleTimeout v s = s { sIdleTimeout = v }
 setMaxConnections :: Int -> Settings -> Settings
 setMaxConnections v s = s { sMaxConnections = v }
 
+-- | Maximum length of the wait queue, i.e. the queue where attempts to
+-- acquire a connection from the pool build up if all connections are in
+-- use. If the maximum length has been reached, attempting to acquire
+-- a connection will cause a 'ConnectionsBusy' 'ConnectionError'.
 setMaxWaitQueue :: Word64 -> Settings -> Settings
 setMaxWaitQueue v s = s { sMaxWaitQueue = Just v }
 
@@ -51,6 +65,9 @@ setPoolStripes v s
     | v < 1     = error "Network.Redis.IO.Settings: at least one stripe required"
     | otherwise = s { sPoolStripes = v }
 
+-- | When a pool connection is opened, connect timeout is the maximum time
+-- we are willing to wait for the connection attempt to the redis server to
+-- succeed.
 setConnectTimeout :: NominalDiffTime -> Settings -> Settings
 setConnectTimeout v s = s { sConnectTimeout = Ms $ round (1000 * v) }
 
