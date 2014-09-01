@@ -61,6 +61,10 @@ test-suite redis-io-tests
     main-is:           Test.hs
     hs-source-dirs:    test
     ghc-options:       -Wall -O2 -fwarn-tabs
+
+    other-modules:
+        CommandTests
+
     build-depends:
         async        == 2.0.*
       , base
