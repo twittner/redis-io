@@ -31,8 +31,12 @@ module Database.Redis.IO
     , ConnectionError (..)
     , InternalError   (..)
     , Timeout         (..)
+
+    -- * Re-exports
+    , module Data.Redis.Command
     ) where
 
 import Database.Redis.IO.Client
 import Database.Redis.IO.Settings
 import Database.Redis.IO.Types
+import Data.Redis.Command

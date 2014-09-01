@@ -15,7 +15,6 @@ import Control.Monad.IO.Class
 import Data.ByteString.Conversion
 import Data.ByteString.Lazy (ByteString)
 import Data.Monoid
-import Data.Redis
 import Database.Redis.IO
 import Test.Tasty
 import Test.Tasty.HUnit

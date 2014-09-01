@@ -14,7 +14,6 @@ import Criterion
 import Criterion.Main
 import Data.ByteString.Lazy
 import Data.Monoid
-import Data.Redis
 import Database.Redis.IO
 
 import qualified Database.Redis as Hedis
