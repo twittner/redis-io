@@ -1,5 +1,5 @@
 name:                redis-io
-version:             0.2
+version:             0.3
 synopsis:            Yet another redis client.
 license:             OtherLicense
 license-file:        LICENSE
@@ -49,7 +49,7 @@ library
       , pipes            == 4.1.*
       , pipes-attoparsec == 0.5.*
       , pipes-parse      == 3.0.*
-      , redis-resp       == 0.2.*
+      , redis-resp       >= 0.2    && < 0.4
       , resource-pool    >= 0.2    && < 0.3
       , time             == 1.4.*
       , transformers     >= 0.3    && < 0.5
