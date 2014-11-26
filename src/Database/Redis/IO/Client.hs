@@ -18,7 +18,6 @@ import Data.ByteString.Lazy (ByteString)
 import Data.Int
 import Data.IORef
 import Data.Redis
-import Data.Word
 import Data.Pool hiding (Pool)
 import Database.Redis.IO.Connection (Connection)
 import Database.Redis.IO.Settings
@@ -35,11 +34,10 @@ import qualified Database.Redis.IO.Timeouts   as TM
 
 -- | Connection pool.
 data Pool = Pool
-    { settings :: Settings
-    , connPool :: P.Pool Connection
-    , logger   :: Logger.Logger
-    , failures :: IORef Word64
-    , timeouts :: TimeoutManager
+    { settings :: !Settings
+    , connPool :: !(P.Pool Connection)
+    , logger   :: !Logger.Logger
+    , timeouts :: !TimeoutManager
     }
 
 -- | Redis client monad.
@@ -68,7 +66,6 @@ mkPool g s = liftIO $ do
                           (sIdleTimeout s)
                           (sMaxConnections s)
            <*> pure g
-           <*> newIORef 0
            <*> pure t
   where
     connOpen t a = do
@@ -305,20 +302,8 @@ withConnection :: (Connection -> IO (a, [IO ()])) -> Client a
 withConnection f = do
     p <- ask
     let c = connPool p
-        s = settings p
-    liftIO $ case sMaxWaitQueue s of
-        Nothing -> withResource c $ \h -> f h >>= \(a, i) -> sequence_ i >> return a
-        Just  q -> tryWithResource c (go p) >>= maybe (retry q c p) return
-  where
-    go p h = do
-        atomicModifyIORef' (failures p) $ \n -> (if n > 0 then n - 1 else 0, ())
-        f h >>= \(a, i) -> sequence_ i >> return a
-
-    retry q c p = do
-        k <- atomicModifyIORef' (failures p) $ \n -> (n + 1, n)
-        unless (k < q) $
-            throwIO ConnectionsBusy
-        withResource c (go p)
+    x <- liftIO $ tryWithResource c $ \h -> f h >>= \(a, i) -> sequence_ i >> return a
+    maybe (throwM ConnectionsBusy) return x
 
 getLazy :: Connection -> Resp -> (Resp -> Result a) -> IO (a, IO ())
 getLazy h x g = do

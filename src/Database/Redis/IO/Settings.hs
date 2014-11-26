@@ -11,14 +11,13 @@ import Data.Word
 import Database.Redis.IO.Types (Milliseconds (..))
 
 data Settings = Settings
-    { sHost            :: String
-    , sPort            :: Word16
-    , sIdleTimeout     :: NominalDiffTime
-    , sMaxConnections  :: Int
-    , sPoolStripes     :: Int
-    , sMaxWaitQueue    :: Maybe Word64
-    , sConnectTimeout  :: Milliseconds
-    , sSendRecvTimeout :: Milliseconds
+    { sHost            :: !String
+    , sPort            :: !Word16
+    , sIdleTimeout     :: !NominalDiffTime
+    , sMaxConnections  :: !Int
+    , sPoolStripes     :: !Int
+    , sConnectTimeout  :: !Milliseconds
+    , sSendRecvTimeout :: !Milliseconds
     }
 
 -- | Default settings.
@@ -28,17 +27,15 @@ data Settings = Settings
 -- * idle timeout = 60s
 -- * stripes = 2
 -- * connections per stripe = 25
--- * max. wait queue = unbounded
 -- * connect timeout = 5s
 -- * send-receive timeout = 10s
 defSettings :: Settings
 defSettings = Settings "localhost" 6379
-    60      -- idle timeout
-    25      -- max connections per stripe
-    2       -- max stripes
-    Nothing -- max wait queue
-    5000    -- connect timeout
-    10000   -- send and recv timeout (sum)
+    60    -- idle timeout
+    50    -- max connections per stripe
+    2     -- max stripes
+    5000  -- connect timeout
+    10000 -- send and recv timeout (sum)
 
 setHost :: String -> Settings -> Settings
 setHost v s = s { sHost = v }
@@ -52,13 +49,6 @@ setIdleTimeout v s = s { sIdleTimeout = v }
 -- | Maximum connections per pool stripe.
 setMaxConnections :: Int -> Settings -> Settings
 setMaxConnections v s = s { sMaxConnections = v }
-
--- | Maximum length of the wait queue, i.e. the queue where attempts to
--- acquire a connection from the pool build up if all connections are in
--- use. If the maximum length has been reached, attempting to acquire
--- a connection will cause a 'ConnectionsBusy' 'ConnectionError'.
-setMaxWaitQueue :: Word64 -> Settings -> Settings
-setMaxWaitQueue v s = s { sMaxWaitQueue = Just v }
 
 setPoolStripes :: Int -> Settings -> Settings
 setPoolStripes v s

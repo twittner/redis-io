@@ -22,7 +22,6 @@ module Database.Redis.IO
     , setPort
     , setIdleTimeout
     , setMaxConnections
-    , setMaxWaitQueue
     , setPoolStripes
     , setConnectTimeout
     , setSendRecvTimeout

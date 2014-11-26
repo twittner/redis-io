@@ -46,8 +46,8 @@ data Connection = Connection
     , logger   :: !Logger
     , timeouts :: !TimeoutManager
     , sock     :: !Socket
-    , leftover :: IORef ByteString
-    , buffer   :: IORef (Seq (Resp, IORef Resp))
+    , leftover :: !(IORef ByteString)
+    , buffer   :: !(IORef (Seq (Resp, IORef Resp)))
     }
 
 instance Show Connection where
