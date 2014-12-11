@@ -5,6 +5,7 @@
 module Database.Redis.IO
     ( -- * Redis client
       Client
+    , MonadClient (..)
     , runRedis
     , stepwise
     , pipelined
