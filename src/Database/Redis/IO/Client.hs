@@ -9,6 +9,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE RankNTypes                 #-}
 {-# LANGUAGE TypeFamilies               #-}
+{-# LANGUAGE UndecidableInstances       #-}
 
 module Database.Redis.IO.Client where
 
@@ -63,23 +64,27 @@ newtype Client a = Client
                , MonadMask
                , MonadCatch
                , MonadReader Pool
+               , MonadBase IO
                )
 
 instance MonadLogger Client where
     log l m = asks logger >>= \g -> Logger.log g l m
 
-instance MonadBase IO Client where
-    liftBase = liftIO
-
+#if MIN_VERSION_monad_control(1,0,0)
+instance MonadBaseControl IO Client where
+    type StM Client a = StM (ReaderT Pool IO) a
+    liftBaseWith f = Client . liftBaseWith $ \run -> f (run . client)
+    restoreM = Client . restoreM
+#else
 instance MonadBaseControl IO Client where
     newtype StM Client a = ClientStM
-        { unClientStM :: StM (ReaderT Pool IO) a
-        }
+        { unClientStM :: StM (ReaderT Pool IO) a }
 
     liftBaseWith f =
         Client . liftBaseWith $ \run -> f (fmap ClientStM . run . client)
 
     restoreM = Client . restoreM . unClientStM
+#endif
 
 -- | Monads in which 'Client' actions may be embedded.
 class (Functor m, Applicative m, Monad m, MonadIO m, MonadCatch m) => MonadClient m
