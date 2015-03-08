@@ -2,23 +2,33 @@
 -- License, v. 2.0. If a copy of the MPL was not distributed with this
 -- file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+{-# LANGUAGE CPP                        #-}
 {-# LANGUAGE GADTs                      #-}
+{-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE OverloadedStrings          #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE RankNTypes                 #-}
+{-# LANGUAGE TypeFamilies               #-}
+{-# LANGUAGE UndecidableInstances       #-}
 
 module Database.Redis.IO.Client where
 
 import Control.Applicative
 import Control.Exception (throw, throwIO)
+import Control.Monad.Base (MonadBase (..))
 import Control.Monad.Catch
+import Control.Monad.IO.Class
 import Control.Monad.Operational
-import Control.Monad.Reader
+import Control.Monad.Reader (ReaderT (..), runReaderT, MonadReader, ask, asks)
+import Control.Monad.Trans.Class
+import Control.Monad.Trans.Control (MonadBaseControl (..))
+#if MIN_VERSION_transformers(0,4,0)
+import Control.Monad.Trans.Except
+#endif
 import Data.ByteString.Lazy (ByteString)
 import Data.Int
 import Data.IORef
 import Data.Redis
-import Data.Word
 import Data.Pool hiding (Pool)
 import Database.Redis.IO.Connection (Connection)
 import Database.Redis.IO.Settings
@@ -28,6 +38,8 @@ import Prelude hiding (readList)
 import System.Logger.Class hiding (Settings, settings, eval)
 import System.IO.Unsafe (unsafeInterleaveIO)
 
+import qualified Control.Monad.State.Strict   as S
+import qualified Control.Monad.State.Lazy     as L
 import qualified Data.Pool                    as P
 import qualified Database.Redis.IO.Connection as C
 import qualified System.Logger                as Logger
@@ -35,11 +47,10 @@ import qualified Database.Redis.IO.Timeouts   as TM
 
 -- | Connection pool.
 data Pool = Pool
-    { settings :: Settings
-    , connPool :: P.Pool Connection
-    , logger   :: Logger.Logger
-    , failures :: IORef Word64
-    , timeouts :: TimeoutManager
+    { settings :: !Settings
+    , connPool :: !(P.Pool Connection)
+    , logger   :: !Logger.Logger
+    , timeouts :: !TimeoutManager
     }
 
 -- | Redis client monad.
@@ -53,10 +64,50 @@ newtype Client a = Client
                , MonadMask
                , MonadCatch
                , MonadReader Pool
+               , MonadBase IO
                )
 
 instance MonadLogger Client where
     log l m = asks logger >>= \g -> Logger.log g l m
+
+#if MIN_VERSION_monad_control(1,0,0)
+instance MonadBaseControl IO Client where
+    type StM Client a = StM (ReaderT Pool IO) a
+    liftBaseWith f = Client . liftBaseWith $ \run -> f (run . client)
+    restoreM = Client . restoreM
+#else
+instance MonadBaseControl IO Client where
+    newtype StM Client a = ClientStM
+        { unClientStM :: StM (ReaderT Pool IO) a }
+
+    liftBaseWith f =
+        Client . liftBaseWith $ \run -> f (fmap ClientStM . run . client)
+
+    restoreM = Client . restoreM . unClientStM
+#endif
+
+-- | Monads in which 'Client' actions may be embedded.
+class (Functor m, Applicative m, Monad m, MonadIO m, MonadCatch m) => MonadClient m
+  where
+    -- | Lift a computation to the 'Client' monad.
+    liftClient :: Client a -> m a
+
+instance MonadClient Client where
+    liftClient = id
+
+instance MonadClient m => MonadClient (ReaderT r m) where
+    liftClient = lift . liftClient
+
+instance MonadClient m => MonadClient (S.StateT s m) where
+    liftClient = lift . liftClient
+
+instance MonadClient m => MonadClient (L.StateT s m) where
+    liftClient = lift . liftClient
+
+#if MIN_VERSION_transformers(0,4,0)
+instance MonadClient m => MonadClient (ExceptT e m) where
+    liftClient = lift . liftClient
+#endif
 
 mkPool :: MonadIO m => Logger -> Settings -> m Pool
 mkPool g s = liftIO $ do
@@ -68,7 +119,6 @@ mkPool g s = liftIO $ do
                           (sIdleTimeout s)
                           (sMaxConnections s)
            <*> pure g
-           <*> newIORef 0
            <*> pure t
   where
     connOpen t a = do
@@ -91,8 +141,8 @@ runRedis p a = liftIO $ runReaderT (client a) p
 -- the next command. A failing command which produces a 'RedisError' will
 -- interrupt the command sequence and the error will be thrown as an
 -- exception.
-stepwise :: Redis IO a -> Client a
-stepwise a = withConnection (flip (eval getEager) a)
+stepwise :: MonadClient m => Redis IO a -> m a
+stepwise a = liftClient $ withConnection (flip (eval getEager) a)
 
 -- | Execute the given redis commands pipelined. I.e. commands are send in
 -- batches to the server and the responses are fetched and parsed after
@@ -100,14 +150,14 @@ stepwise a = withConnection (flip (eval getEager) a)
 -- a 'RedisError' will /not/ prevent subsequent commands from being
 -- executed by the redis server. However the first error will be thrown as
 -- an exception.
-pipelined :: Redis IO a -> Client a
-pipelined a = withConnection (flip (eval getLazy) a)
+pipelined :: MonadClient m => Redis IO a -> m a
+pipelined a = liftClient $ withConnection (flip (eval getLazy) a)
 
 -- | Execute the given publish\/subscribe commands. The first parameter is
 -- the callback function which will be invoked with channel and message
 -- once messages arrive.
-pubSub :: (ByteString -> ByteString -> PubSub IO ()) -> PubSub IO () -> Client ()
-pubSub f a = withConnection (loop a)
+pubSub :: MonadClient m => (ByteString -> ByteString -> PubSub IO ()) -> PubSub IO () -> m ()
+pubSub f a = liftClient $ withConnection (loop a)
   where
     loop :: PubSub IO () -> Connection -> IO ((), [IO ()])
     loop p h = do
@@ -305,20 +355,8 @@ withConnection :: (Connection -> IO (a, [IO ()])) -> Client a
 withConnection f = do
     p <- ask
     let c = connPool p
-        s = settings p
-    liftIO $ case sMaxWaitQueue s of
-        Nothing -> withResource c $ \h -> f h >>= \(a, i) -> sequence_ i >> return a
-        Just  q -> tryWithResource c (go p) >>= maybe (retry q c p) return
-  where
-    go p h = do
-        atomicModifyIORef' (failures p) $ \n -> (if n > 0 then n - 1 else 0, ())
-        f h >>= \(a, i) -> sequence_ i >> return a
-
-    retry q c p = do
-        k <- atomicModifyIORef' (failures p) $ \n -> (n + 1, n)
-        unless (k < q) $
-            throwIO ConnectionsBusy
-        withResource c (go p)
+    x <- liftIO $ tryWithResource c $ \h -> f h >>= \(a, i) -> sequence_ i >> return a
+    maybe (throwM ConnectionsBusy) return x
 
 getLazy :: Connection -> Resp -> (Resp -> Result a) -> IO (a, IO ())
 getLazy h x g = do

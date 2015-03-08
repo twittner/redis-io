@@ -5,6 +5,7 @@
 module Database.Redis.IO
     ( -- * Redis client
       Client
+    , MonadClient (..)
     , runRedis
     , stepwise
     , pipelined
@@ -22,7 +23,6 @@ module Database.Redis.IO
     , setPort
     , setIdleTimeout
     , setMaxConnections
-    , setMaxWaitQueue
     , setPoolStripes
     , setConnectTimeout
     , setSendRecvTimeout

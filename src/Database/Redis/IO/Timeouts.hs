@@ -22,12 +22,12 @@ import Database.Redis.IO.Types (Milliseconds (..), ignore)
 
 data TimeoutManager = TimeoutManager
     { roundtrip :: !Int
-    , reaper    :: Reaper [Action] Action
+    , reaper    :: !(Reaper [Action] Action)
     }
 
 data Action = Action
-    { action :: IO ()
-    , state  :: IORef State
+    { action :: !(IO ())
+    , state  :: !(IORef State)
     }
 
 data State = Running !Int | Canceled
