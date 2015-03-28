@@ -19,6 +19,7 @@ import Control.Reaper
 import Control.Monad
 import Data.IORef
 import Database.Redis.IO.Types (Milliseconds (..), ignore)
+import Prelude
 
 data TimeoutManager = TimeoutManager
     { roundtrip :: !Int

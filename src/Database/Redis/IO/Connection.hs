@@ -37,6 +37,7 @@ import Network.Socket hiding (connect, close, send, recv)
 import Network.Socket.ByteString (recv, sendMany)
 import System.Logger hiding (Settings, settings, close)
 import System.Timeout
+import Prelude
 
 import qualified Data.Sequence  as Seq
 import qualified Network.Socket as S
