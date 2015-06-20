@@ -50,6 +50,7 @@ library
       , operational       == 0.2.*
       , redis-resp        >= 0.2      && < 0.4
       , resource-pool     >= 0.2      && < 0.3
+      , stm               >= 2.4      && < 3.0
       , time              >= 1.4      && < 2.0
       , transformers      >= 0.3      && < 0.5
       , transformers-base >= 0.4      && < 1.0
