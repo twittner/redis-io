@@ -4,13 +4,46 @@
 
 {-# LANGUAGE DeriveDataTypeable         #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE OverloadedStrings          #-}
 
 module Database.Redis.IO.Types where
 
 import Control.Exception (Exception, SomeException, catch)
+import Data.IP
 import Data.Typeable
+import Network.Socket (SockAddr (..), PortNumber)
+import System.Logger.Message
 
 newtype Milliseconds = Ms { ms :: Int } deriving (Eq, Show, Num)
+
+-----------------------------------------------------------------------------
+-- InetAddr
+
+newtype InetAddr = InetAddr { sockAddr :: SockAddr } deriving (Eq, Ord)
+
+instance Show InetAddr where
+    show (InetAddr (SockAddrInet p a)) =
+        let i = fromIntegral p :: Int in
+        shows (fromHostAddress a) . showString ":" . shows i $ ""
+    show (InetAddr (SockAddrInet6 p _ a _)) =
+        let i = fromIntegral p :: Int in
+        shows (fromHostAddress6 a) . showString ":" . shows i $ ""
+    show (InetAddr (SockAddrUnix unix)) = unix
+    show (InetAddr (SockAddrCan int32)) = show int32
+
+instance ToBytes InetAddr where
+    bytes (InetAddr (SockAddrInet p a)) =
+        let i = fromIntegral p :: Int in
+        show (fromHostAddress a) +++ val ":" +++ i
+    bytes (InetAddr (SockAddrInet6 p _ a _)) =
+        let i = fromIntegral p :: Int in
+        show (fromHostAddress6 a) +++ val ":" +++ i
+    bytes (InetAddr (SockAddrUnix unix)) = bytes unix
+    bytes (InetAddr (SockAddrCan int32)) = bytes int32
+
+ip2inet :: PortNumber -> IP -> InetAddr
+ip2inet p (IPv4 a) = InetAddr $ SockAddrInet p (toHostAddress a)
+ip2inet p (IPv6 a) = InetAddr $ SockAddrInet6 p 0 (toHostAddress6 a) 0
 
 -----------------------------------------------------------------------------
 -- ConnectionError

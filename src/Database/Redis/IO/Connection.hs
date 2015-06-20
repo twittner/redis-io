@@ -2,6 +2,7 @@
 -- License, v. 2.0. If a copy of the MPL was not distributed with this
 -- file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+{-# LANGUAGE BangPatterns      #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TupleSections     #-}
 
@@ -28,7 +29,9 @@ import Data.IORef
 import Data.Maybe (isJust)
 import Data.Redis
 import Data.Sequence (Seq, (|>))
+import Data.Int
 import Data.Word
+import Foreign.C.Types (CInt (..))
 import Database.Redis.IO.Settings
 import Database.Redis.IO.Types
 import Database.Redis.IO.Timeouts (TimeoutManager, withTimeout)
@@ -39,35 +42,45 @@ import System.Logger hiding (Settings, settings, close)
 import System.Timeout
 import Prelude
 
-import qualified Data.Sequence  as Seq
+import qualified Data.ByteString.Lazy.Char8 as Char8
+import qualified Data.Sequence as Seq
 import qualified Network.Socket as S
 
 data Connection = Connection
     { settings :: !Settings
     , logger   :: !Logger
     , timeouts :: !TimeoutManager
+    , address  :: !InetAddr
     , sock     :: !Socket
     , leftover :: !(IORef ByteString)
     , buffer   :: !(IORef (Seq (Resp, IORef Resp)))
     }
 
 instance Show Connection where
-    show c = "Connection" ++ show (sock c)
+    show = Char8.unpack . eval . bytes
 
-resolve :: String -> Word16 -> IO AddrInfo
+instance ToBytes Connection where
+    bytes c = bytes (address c) +++ val "#" +++ fd (sock c)
+
+resolve :: String -> Word16 -> IO [InetAddr]
 resolve host port =
-    head <$> getAddrInfo (Just hints) (Just host) (Just (show port))
+    map (InetAddr . addrAddress) <$> getAddrInfo (Just hints) (Just host) (Just (show port))
   where
     hints = defaultHints { addrFlags = [AI_ADDRCONFIG], addrSocketType = Stream }
 
-connect :: Settings -> Logger -> TimeoutManager -> AddrInfo -> IO Connection
+connect :: Settings -> Logger -> TimeoutManager -> InetAddr -> IO Connection
 connect t g m a = bracketOnError mkSock S.close $ \s -> do
-    ok <- timeout (ms (sConnectTimeout t) * 1000) (S.connect s (addrAddress a))
+    ok <- timeout (ms (sConnectTimeout t) * 1000) (S.connect s (sockAddr a))
     unless (isJust ok) $
         throwIO ConnectTimeout
-    Connection t g m s <$> newIORef "" <*> newIORef Seq.empty
+    Connection t g m a s <$> newIORef "" <*> newIORef Seq.empty
   where
-    mkSock = socket (addrFamily a) (addrSocketType a) (addrProtocol a)
+    mkSock = socket (familyOf $ sockAddr a) Stream defaultProtocol
+
+    familyOf (SockAddrInet  _ _    ) = AF_INET
+    familyOf (SockAddrInet6 _ _ _ _) = AF_INET6
+    familyOf (SockAddrUnix  _      ) = AF_UNIX
+    familyOf (SockAddrCan   _      ) = AF_CAN
 
 close :: Connection -> IO ()
 close = S.close . sock
@@ -121,3 +134,8 @@ receiveWith c b = do
 errorCheck :: Resp -> IO Resp
 errorCheck (Err e) = throwIO $ RedisError e
 errorCheck r       = return r
+
+-- logging helpers:
+
+fd :: Socket -> Int32
+fd !s = let CInt !n = fdSocket s in n

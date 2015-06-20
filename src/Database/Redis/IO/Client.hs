@@ -40,6 +40,7 @@ import System.IO.Unsafe (unsafeInterleaveIO)
 
 import qualified Control.Monad.State.Strict   as S
 import qualified Control.Monad.State.Lazy     as L
+import qualified Data.List.NonEmpty           as NE
 import qualified Data.Pool                    as P
 import qualified Database.Redis.IO.Connection as C
 import qualified System.Logger                as Logger
@@ -121,7 +122,7 @@ mkPool g s = liftIO $ do
            <*> pure g
            <*> pure t
   where
-    connOpen t a = do
+    connOpen t aa = tryAll (NE.fromList aa) $ \a -> do
         c <- C.connect s g t a
         Logger.debug g $ "client.connect" .= sHost s ~~ msg (show c)
         return c
@@ -392,3 +393,8 @@ withTimeout :: Int64 -> Connection -> Connection
 withTimeout 0 c = c { C.settings = setSendRecvTimeout 0                     (C.settings c) }
 withTimeout t c = c { C.settings = setSendRecvTimeout (10 + fromIntegral t) (C.settings c) }
 {-# INLINE withTimeout #-}
+
+tryAll :: NonEmpty a -> (a -> IO b) -> IO b
+tryAll (a :| []) f = f a
+tryAll (a :| aa) f = f a `catchAll` (const $ tryAll (NE.fromList aa) f)
+{-# INLINE tryAll #-}
