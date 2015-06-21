@@ -1,11 +1,11 @@
 name:                redis-io
-version:             0.4.1
+version:             0.5.0
 synopsis:            Yet another redis client.
-license:             OtherLicense
+license:             MPL-2.0
 license-file:        LICENSE
 author:              Toralf Wittner
 maintainer:          Toralf Wittner <tw@dtex.org>
-copyright:           (c) 2014-2015 Toralf Wittner
+copyright:           (C) 2014-2015 Toralf Wittner
 homepage:            https://github.com/twittner/redis-io/
 bug-reports:         https://github.com/twittner/redis-io/issues
 stability:           experimental
@@ -25,7 +25,6 @@ library
     default-language: Haskell2010
     hs-source-dirs:   src
     ghc-options:      -Wall -O2 -fwarn-tabs -funbox-strict-fields
-    ghc-prof-options: -prof -auto-all
 
     exposed-modules:
         Database.Redis.IO
