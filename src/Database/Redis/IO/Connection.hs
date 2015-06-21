@@ -14,6 +14,7 @@ module Database.Redis.IO.Connection
     , close
     , request
     , sync
+    , transaction
     , send
     , receive
     ) where
@@ -24,7 +25,7 @@ import Control.Monad
 import Data.Attoparsec.ByteString hiding (Result)
 import Data.ByteString (ByteString)
 import Data.ByteString.Lazy (toChunks)
-import Data.Foldable hiding (concatMap)
+import Data.Foldable (for_, foldlM, toList)
 import Data.IORef
 import Data.Maybe (isJust)
 import Data.Redis
@@ -88,30 +89,53 @@ close = S.close . sock
 request :: Resp -> IORef Resp -> Connection -> IO ()
 request x y c = modifyIORef' (buffer c) (|> (x, y))
 
-sync :: Connection -> IO ()
-sync c = do
-    a <- readIORef (buffer c)
-    unless (Seq.null a) $ do
+transaction :: Connection -> IO ()
+transaction c = do
+    buf <- readIORef (buffer c)
+    unless (Seq.null buf) $ do
         writeIORef (buffer c) Seq.empty
         case sSendRecvTimeout (settings c) of
-            0 -> go a
-            t -> withTimeout (timeouts c) t abort (go a)
+            0 -> go buf
+            t -> withTimeout (timeouts c) t (abort c) (go buf)
   where
-    go a = do
-        send c (toList $ fmap fst a)
-        bb <- readIORef (leftover c)
-        foldlM fetchResult bb (fmap snd a) >>= writeIORef (leftover c)
+    go buf = do
+        let (reqs, vars) = unzip (toList buf)
+        send c (cmdMulti : reqs ++ [cmdExecute])
+        receive c >>= expect "MULTI" "OK"
+        for_ vars $ const $
+            receive c >>= expect "*" "QUEUED"
+        (lft, res) <- receiveWith c =<< readIORef (leftover c)
+        writeIORef (leftover c) lft
+        case res of
+            Array n resps | n == length vars ->
+                mapM_ (uncurry writeIORef) (zip vars resps)
+            _ -> throwIO (InvalidResponse "EXEC")
 
-    abort = do
-        err (logger c) $ "connection.timeout" .= show c
-        close c
-        throwIO $ Timeout (show c)
+sync :: Connection -> IO ()
+sync c = do
+    buf <- readIORef (buffer c)
+    unless (Seq.null buf) $ do
+        writeIORef (buffer c) Seq.empty
+        case sSendRecvTimeout (settings c) of
+            0 -> go buf
+            t -> withTimeout (timeouts c) t (abort c) (go buf)
+  where
+    go buf = do
+        send c (toList $ fmap fst buf)
+        bb <- readIORef (leftover c)
+        foldlM fetchResult bb (fmap snd buf) >>= writeIORef (leftover c)
 
     fetchResult :: ByteString -> IORef Resp -> IO ByteString
     fetchResult b r = do
         (b', x) <- receiveWith c b
         writeIORef r x
         return b'
+
+abort :: Connection -> IO a
+abort c = do
+    err (logger c) $ "connection.timeout" .= show c
+    close c
+    throwIO $ Timeout (show c)
 
 send :: Connection -> [Resp] -> IO ()
 send c = sendMany (sock c) . concatMap (toChunks . encode)
@@ -135,7 +159,16 @@ errorCheck :: Resp -> IO Resp
 errorCheck (Err e) = throwIO $ RedisError e
 errorCheck r       = return r
 
--- logging helpers:
+-- Helpers:
 
 fd :: Socket -> Int32
 fd !s = let CInt !n = fdSocket s in n
+
+cmdMulti :: Resp
+cmdMulti = Array 1 [Bulk "MULTI"]
+
+cmdExecute :: Resp
+cmdExecute = Array 1 [Bulk "EXEC"]
+
+expect :: String -> Char8.ByteString -> Resp -> IO ()
+expect x y = void . either throwIO return . matchStr x y

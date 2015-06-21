@@ -9,6 +9,7 @@ module Database.Redis.IO
     , runRedis
     , stepwise
     , pipelined
+    , transactional
     , pubSub
 
     -- * Connection pool

@@ -154,6 +154,11 @@ stepwise a = liftClient $ withConnection (flip (eval getEager) a)
 pipelined :: MonadClient m => Redis IO a -> m a
 pipelined a = liftClient $ withConnection (flip (eval getLazy) a)
 
+
+-- | Execute the given redis commands in a Redis transaction.
+transactional :: MonadClient m => Redis IO a -> m a
+transactional a = liftClient $ withConnection (flip (eval getTransaction) a)
+
 -- | Execute the given publish\/subscribe commands. The first parameter is
 -- the callback function which will be invoked with channel and message
 -- once messages arrive.
@@ -368,6 +373,18 @@ getLazy h x g = do
         either throwIO return =<< g <$> readIORef r
     return (a, a `seq` return ())
 {-# INLINE getLazy #-}
+
+-- | Just like 'getLazy', but executes the 'Connection' buffer in a Redis
+-- transaction.
+getTransaction :: Connection -> Resp -> (Resp -> Result a) -> IO (a, IO ())
+getTransaction h x g = do
+    r <- newIORef (throw $ RedisError "missing response")
+    C.request x r h
+    a <- unsafeInterleaveIO $ do
+        C.transaction h
+        either throwIO return =<< g <$> readIORef r
+    return (a, a `seq` return ())
+{-# INLINE getTransaction #-}
 
 getNow :: Connection -> Resp -> (Resp -> Result a) -> IO (a, IO ())
 getNow h x g = do
