@@ -3,6 +3,7 @@
 -- file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 {-# LANGUAGE BangPatterns      #-}
+{-# LANGUAGE CPP               #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TupleSections     #-}
 
@@ -81,7 +82,9 @@ connect t g m a = bracketOnError mkSock S.close $ \s -> do
     familyOf (SockAddrInet  _ _    ) = AF_INET
     familyOf (SockAddrInet6 _ _ _ _) = AF_INET6
     familyOf (SockAddrUnix  _      ) = AF_UNIX
+#if MIN_VERSION_network(2,6,1)
     familyOf (SockAddrCan   _      ) = AF_CAN
+#endif
 
 close :: Connection -> IO ()
 close = S.close . sock
@@ -107,9 +110,10 @@ transaction c = do
         (lft, res) <- receiveWith c =<< readIORef (leftover c)
         writeIORef (leftover c) lft
         case res of
-            Array n resps | n == length vars ->
-                mapM_ (uncurry writeIORef) (zip vars resps)
-            _ -> throwIO (InvalidResponse "EXEC")
+            Array n resps
+                | n == length vars -> mapM_ (uncurry writeIORef) (zip vars resps)
+            Err e -> throwIO (TransactionFailure $ show e)
+            _     -> throwIO (TransactionFailure "invalid exec response")
 
 sync :: Connection -> IO ()
 sync c = do

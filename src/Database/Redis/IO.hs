@@ -29,9 +29,10 @@ module Database.Redis.IO
     , setSendRecvTimeout
 
     -- * Exceptions
-    , ConnectionError (..)
-    , InternalError   (..)
-    , Timeout         (..)
+    , ConnectionError    (..)
+    , InternalError      (..)
+    , Timeout            (..)
+    , TransactionFailure (..)
 
     -- * Re-exports
     , module Data.Redis.Command
