@@ -40,6 +40,7 @@ import System.IO.Unsafe (unsafeInterleaveIO)
 
 import qualified Control.Monad.State.Strict   as S
 import qualified Control.Monad.State.Lazy     as L
+import qualified Data.List.NonEmpty           as NE
 import qualified Data.Pool                    as P
 import qualified Database.Redis.IO.Connection as C
 import qualified System.Logger                as Logger
@@ -121,7 +122,7 @@ mkPool g s = liftIO $ do
            <*> pure g
            <*> pure t
   where
-    connOpen t a = do
+    connOpen t aa = tryAll (NE.fromList aa) $ \a -> do
         c <- C.connect s g t a
         Logger.debug g $ "client.connect" .= sHost s ~~ msg (show c)
         return c
@@ -152,6 +153,11 @@ stepwise a = liftClient $ withConnection (flip (eval getEager) a)
 -- an exception.
 pipelined :: MonadClient m => Redis IO a -> m a
 pipelined a = liftClient $ withConnection (flip (eval getLazy) a)
+
+
+-- | Execute the given redis commands in a Redis transaction.
+transactional :: MonadClient m => Redis IO a -> m a
+transactional a = liftClient $ withConnection (flip (eval getTransaction) a)
 
 -- | Execute the given publish\/subscribe commands. The first parameter is
 -- the callback function which will be invoked with channel and message
@@ -368,6 +374,18 @@ getLazy h x g = do
     return (a, a `seq` return ())
 {-# INLINE getLazy #-}
 
+-- | Just like 'getLazy', but executes the 'Connection' buffer in a Redis
+-- transaction.
+getTransaction :: Connection -> Resp -> (Resp -> Result a) -> IO (a, IO ())
+getTransaction h x g = do
+    r <- newIORef (throw $ RedisError "missing response")
+    C.request x r h
+    a <- unsafeInterleaveIO $ do
+        C.transaction h
+        either throwIO return =<< g <$> readIORef r
+    return (a, a `seq` return ())
+{-# INLINE getTransaction #-}
+
 getNow :: Connection -> Resp -> (Resp -> Result a) -> IO (a, IO ())
 getNow h x g = do
     r <- newIORef (throw $ RedisError "missing response")
@@ -392,3 +410,8 @@ withTimeout :: Int64 -> Connection -> Connection
 withTimeout 0 c = c { C.settings = setSendRecvTimeout 0                     (C.settings c) }
 withTimeout t c = c { C.settings = setSendRecvTimeout (10 + fromIntegral t) (C.settings c) }
 {-# INLINE withTimeout #-}
+
+tryAll :: NonEmpty a -> (a -> IO b) -> IO b
+tryAll (a :| []) f = f a
+tryAll (a :| aa) f = f a `catchAll` (const $ tryAll (NE.fromList aa) f)
+{-# INLINE tryAll #-}

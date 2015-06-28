@@ -9,6 +9,7 @@ module Database.Redis.IO
     , runRedis
     , stepwise
     , pipelined
+    , transactional
     , pubSub
 
     -- * Connection pool
@@ -28,9 +29,10 @@ module Database.Redis.IO
     , setSendRecvTimeout
 
     -- * Exceptions
-    , ConnectionError (..)
-    , InternalError   (..)
-    , Timeout         (..)
+    , ConnectionError    (..)
+    , InternalError      (..)
+    , Timeout            (..)
+    , TransactionFailure (..)
 
     -- * Re-exports
     , module Data.Redis.Command
