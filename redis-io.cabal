@@ -1,5 +1,5 @@
 name:                redis-io
-version:             0.5.0
+version:             0.5.1
 synopsis:            Yet another redis client.
 license:             MPL-2.0
 license-file:        LICENSE

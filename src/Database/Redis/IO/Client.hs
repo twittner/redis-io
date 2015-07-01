@@ -74,7 +74,7 @@ instance MonadLogger Client where
 #if MIN_VERSION_monad_control(1,0,0)
 instance MonadBaseControl IO Client where
     type StM Client a = StM (ReaderT Pool IO) a
-    liftBaseWith f = Client . liftBaseWith $ \run -> f (run . client)
+    liftBaseWith f = Client $ liftBaseWith $ \run -> f (run . client)
     restoreM = Client . restoreM
 #else
 instance MonadBaseControl IO Client where
@@ -82,7 +82,7 @@ instance MonadBaseControl IO Client where
         { unClientStM :: StM (ReaderT Pool IO) a }
 
     liftBaseWith f =
-        Client . liftBaseWith $ \run -> f (fmap ClientStM . run . client)
+        Client $ liftBaseWith $ \run -> f (fmap ClientStM . run . client)
 
     restoreM = Client . restoreM . unClientStM
 #endif
