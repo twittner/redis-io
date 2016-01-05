@@ -1,11 +1,11 @@
 name:                redis-io
-version:             0.5.1
+version:             0.5.2
 synopsis:            Yet another redis client.
 license:             MPL-2.0
 license-file:        LICENSE
 author:              Toralf Wittner
 maintainer:          Toralf Wittner <tw@dtex.org>
-copyright:           (C) 2014-2015 Toralf Wittner
+copyright:           (C) 2014-2016 Toralf Wittner
 homepage:            https://github.com/twittner/redis-io/
 bug-reports:         https://github.com/twittner/redis-io/issues
 stability:           experimental
@@ -68,7 +68,7 @@ test-suite redis-io-tests
         CommandTests
 
     build-depends:
-        async                 == 2.0.*
+        async                 >= 2.0
       , base
       , bytestring
       , bytestring-conversion >= 0.2
